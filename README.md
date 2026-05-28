@@ -1,4 +1,4 @@
-# g2-matrix
+# monocle
 
 A lightweight Rust orchestrator that bridges smart glasses voice commands to Matrix messaging rooms.
 
@@ -59,7 +59,7 @@ Requires Rust 1.78+, OpenSSL/pkg-config on Linux.
 
 ```bash
 cargo build --release
-./target/release/g2-matrix --config config.toml
+./target/release/monocle --config config.toml
 ```
 
 ```bash

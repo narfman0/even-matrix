@@ -19,7 +19,7 @@ use tokio::sync::{broadcast, Mutex};
 use tracing::info;
 
 #[derive(Parser)]
-#[command(name = "g2-matrix", about = "G2 glasses <-> Matrix orchestrator")]
+#[command(name = "monocle", about = "Smart glasses <-> Matrix orchestrator")]
 struct Args {
     #[arg(short, long, default_value = "config.toml")]
     config: String,

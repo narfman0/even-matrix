@@ -1,5 +1,5 @@
 {
-  "name": "g2-matrix-plugin",
+  "name": "monocle-plugin",
   "version": "0.1.0",
   "scripts": {
     "dev": "vite",

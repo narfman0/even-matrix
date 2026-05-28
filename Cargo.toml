@@ -1,10 +1,10 @@
 [package]
-name = "g2-matrix"
+name = "monocle"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "g2-matrix"
+name = "monocle"
 path = "src/main.rs"
 
 [dependencies]
