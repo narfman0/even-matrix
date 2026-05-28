@@ -2,7 +2,7 @@
 # matrix-sdk links against OpenSSL on Linux, so the builder needs
 # pkg-config + libssl-dev and the runtime needs libssl3 + ca-certificates.
 
-FROM rust:1.83-bookworm AS builder
+FROM rust:1.85-bookworm AS builder
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
       pkg-config libssl-dev libsqlite3-dev \
