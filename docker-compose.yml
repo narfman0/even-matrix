@@ -2,17 +2,15 @@ services:
   # monocle — smart-glasses <-> Matrix orchestrator. Serves the EvenHub
   # plugin WebSocket on :4000. Secrets live in config.toml, which is
   # gitignored and mounted read-only at runtime (not baked into the image).
+  # network_mode: host required when Matrix homeserver is on localhost.
   monocle:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: runtime
+    build: .
     image: monocle:latest
     container_name: monocle
     restart: unless-stopped
-    ports:
-      # Host port is overridable; container port must match [g2].port in config.toml (default 4000).
-      - "${MONOCLE_PORT:-4000}:4000"
+    network_mode: host
     volumes:
-      # Copy config.example.toml -> config.toml and fill in your Matrix creds first.
-      - ./config.toml:/config/config.toml:ro
+      # config.toml is gitignored — copy config.example.toml and fill in creds.
+      - ./config.toml:/app/config.toml:ro
+      # matrix-sdk persists session/sync state here (sqlite).
+      - ./monocle-data:/app/data
