@@ -1,0 +1,14 @@
+[matrix]
+homeserver = "https://matrix.example.com"
+user_id    = "@you:example.com"
+token      = "your-matrix-access-token"
+
+[rooms]
+# Map friendly alias -> Matrix room ID
+default = "!yourDefaultRoomId:example.com"
+wife    = "!wifeRoomId:example.com"
+work    = "!workRoomId:example.com"
+
+[g2]
+port  = 4000
+token = "changeme"

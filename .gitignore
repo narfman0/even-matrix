@@ -1,0 +1,5 @@
+/target
+config.toml
+plugin/node_modules
+plugin/dist
+*.log
