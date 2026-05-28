@@ -1,0 +1,7 @@
+/target
+plugin/node_modules
+plugin/dist
+*.log
+.git
+# config.toml holds Matrix credentials — keep it out of the build context.
+config.toml
