@@ -26,7 +26,9 @@ impl MatrixClient {
 
         client
             .matrix_auth()
-            .login_token(&cfg.matrix.token)
+            .login_username(&cfg.matrix.user_id, &cfg.matrix.password)
+            .initial_device_display_name("monocle")
+            .send()
             .await?;
 
         let room_map: HashMap<String, OwnedRoomId> = cfg

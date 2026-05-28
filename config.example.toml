@@ -1,7 +1,7 @@
 [matrix]
 homeserver = "https://matrix.example.com"
 user_id    = "@you:example.com"
-token      = "your-matrix-access-token"
+password   = "your-matrix-password"
 
 [rooms]
 # Map friendly alias -> Matrix room ID

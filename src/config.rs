@@ -12,7 +12,7 @@ pub struct Config {
 pub struct MatrixConfig {
     pub homeserver: String,
     pub user_id: String,
-    pub token: String,
+    pub password: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -36,7 +36,7 @@ mod tests {
 [matrix]
 homeserver = "https://matrix.example.com"
 user_id    = "@alice:example.com"
-token      = "syt_test_token"
+password   = "hunter2"
 
 [rooms]
 default = "!abc123:example.com"
