@@ -1,6 +1,14 @@
-import { waitForEvenAppBridge, OsEventTypeList } from '@evenrealities/even_hub_sdk'
+import {
+  waitForEvenAppBridge,
+  OsEventTypeList,
+  CreateStartUpPageContainer,
+  TextContainerProperty,
+  TextContainerUpgrade,
+} from '@evenrealities/even_hub_sdk'
 
-const WS_URL = 'ws://localhost:4000/ws'
+const DEFAULT_HOST = '192.168.1.11:4000'
+const STORAGE_KEY_HOST = 'monocle_host'
+const TEXT_CONTAINER_ID = 1
 
 interface ServerEvent {
   type: 'message' | 'status' | 'rooms' | 'pong'
@@ -21,11 +29,31 @@ interface ClientMsg {
 async function main() {
   const bridge = await waitForEvenAppBridge()
 
-  // --- WebSocket to Rust orchestrator ---
   let ws: WebSocket | null = null
   let statusText = 'Connecting...'
   let feedLines: string[] = []
   let recognizing = false
+
+  // Load persisted host or fall back to default
+  const savedHost = await bridge.getLocalStorage(STORAGE_KEY_HOST).catch(() => '')
+  const host = savedHost || DEFAULT_HOST
+  const WS_URL = `ws://${host}/ws`
+
+  await bridge.createStartUpPageContainer(new CreateStartUpPageContainer({
+    containerTotalNum: 1,
+    textObject: [new TextContainerProperty({
+      containerID: TEXT_CONTAINER_ID,
+      content: statusText,
+    })],
+  }))
+
+  async function render() {
+    const lines = [statusText, '---', ...feedLines.slice(0, 6)]
+    await bridge.textContainerUpgrade(new TextContainerUpgrade({
+      containerID: TEXT_CONTAINER_ID,
+      content: lines.join('\n'),
+    }))
+  }
 
   function send(msg: ClientMsg) {
     if (ws?.readyState === WebSocket.OPEN) {
@@ -33,20 +61,11 @@ async function main() {
     }
   }
 
-  function render() {
-    const lines = [
-      statusText,
-      '---',
-      ...feedLines.slice(0, 6),
-    ]
-    bridge.sendTextToGlasses(lines.join('\n'))
-  }
-
   function connect() {
     ws = new WebSocket(WS_URL)
 
     ws.onopen = () => {
-      statusText = 'Connected'
+      statusText = `Connected (${host})`
       render()
       send({ type: 'ping' })
     }
@@ -78,9 +97,23 @@ async function main() {
     }
   }
 
-  connect()
+  async function handleTranscript(transcript: string) {
+    const lower = transcript.toLowerCase().trim()
 
-  // --- Speech recognition ---
+    // "set server 192.168.1.11" or "set server 192.168.1.11:4000"
+    const setServerMatch = lower.match(/^set server\s+([\d.:]+)$/)
+    if (setServerMatch) {
+      let newHost = setServerMatch[1]
+      if (!newHost.includes(':')) newHost += ':4000'
+      await bridge.setLocalStorage(STORAGE_KEY_HOST, newHost)
+      statusText = `Server set to ${newHost} — restart to apply`
+      render()
+      return
+    }
+
+    send({ type: 'transcript', text: transcript })
+  }
+
   function startVoice() {
     const SR =
       (window as unknown as Record<string, unknown>)['SpeechRecognition'] ??
@@ -107,7 +140,7 @@ async function main() {
       const transcript: string = event.results[0][0].transcript
       statusText = `Heard: ${transcript}`
       render()
-      send({ type: 'transcript', text: transcript })
+      handleTranscript(transcript)
     }
 
     rec.onend = () => {
@@ -124,19 +157,16 @@ async function main() {
     rec.start()
   }
 
-  // --- G2 input events ---
   bridge.onEvenHubEvent((event) => {
     const sys = event.sysEvent
     if (!sys) return
 
     switch (sys.eventType) {
       case OsEventTypeList.CLICK_EVENT:
-        // Single tap: send ping / cycle rooms
         send({ type: 'ping' })
         break
 
       case OsEventTypeList.DOUBLE_CLICK_EVENT:
-        // Double tap: start voice input
         if (!recognizing) startVoice()
         break
 
@@ -145,6 +175,7 @@ async function main() {
     }
   })
 
+  connect()
   render()
 }
 
