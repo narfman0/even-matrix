@@ -1,4 +1,4 @@
-use crate::{intent, session::SessionState};
+use crate::session::SessionState;
 use axum::{
     extract::{
         State, WebSocketUpgrade,
@@ -77,21 +77,12 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: EventTx) {
             match serde_json::from_str::<ClientMsg>(&text) {
                 Ok(ClientMsg::Transcript { text: transcript }) => {
                     info!("Transcript: {transcript}");
-                    let parsed = intent::parse(&transcript);
-                    // Emit immediate status feedback to the glasses
                     let _ = tx.send(ServerEvent::Status {
                         text: format!("Heard: {transcript}"),
                     });
-                    // Store pending intent for the dispatch loop to pick up
-                    state.lock().await.last_transcript = Some((parsed, transcript));
+                    state.lock().await.last_transcript = Some(transcript);
                 }
-                Ok(ClientMsg::Focus { room }) => {
-                    let mut s = state.lock().await;
-                    s.focused_room = Some(room.clone());
-                    let _ = tx.send(ServerEvent::Status {
-                        text: format!("Focused: {room}"),
-                    });
-                }
+                Ok(ClientMsg::Focus { .. }) => {}
                 Ok(ClientMsg::Ping) => {
                     let _ = tx.send(ServerEvent::Pong);
                 }

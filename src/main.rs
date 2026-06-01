@@ -1,5 +1,4 @@
 mod config;
-mod intent;
 mod matrix;
 mod session;
 mod api;
@@ -34,17 +33,11 @@ async fn main() -> Result<()> {
     let matrix = matrix::MatrixClient::connect(&cfg).await?;
     let (tx, _) = broadcast::channel::<api::ServerEvent>(64);
 
-    let state = Arc::new(Mutex::new(session::SessionState {
-        focused_room: cfg.rooms.keys().next().cloned(),
-        rooms: cfg.rooms.keys().cloned().collect(),
-        ..Default::default()
-    }));
+    let state = Arc::new(Mutex::new(session::SessionState::default()));
 
-    // Register Matrix message handler — clone what we need before wrapping matrix in Arc
+    // Register Matrix message handler
     {
         let tx2 = tx.clone();
-        // Build a plain HashMap<String,String> for alias lookup inside the handler
-        // (avoids needing to share MatrixClient itself across the handler closure)
         let alias_map: HashMap<String, String> = cfg
             .rooms
             .iter()
@@ -78,10 +71,9 @@ async fn main() -> Result<()> {
         );
     }
 
-    // Wrap the Matrix client in Arc so it can be shared with the intent dispatch task
     let matrix = Arc::new(matrix);
 
-    // Intent dispatch loop — polls for pending transcripts from the WS handler
+    // Dispatch loop — sends every transcript as-is to the default room
     {
         let state2 = Arc::clone(&state);
         let tx2 = tx.clone();
@@ -97,70 +89,16 @@ async fn main() -> Result<()> {
                     s.last_transcript.take()
                 };
 
-                if let Some((intent_val, _raw)) = pending {
-                    use intent::Intent;
-                    match intent_val {
-                        Intent::Send { room_alias, message } => {
-                            match matrix2.send(&room_alias, &message).await {
-                                Ok(_) => {
-                                    let _ = tx2.send(api::ServerEvent::Status {
-                                        text: format!("Sent to {room_alias}"),
-                                    });
-                                }
-                                Err(e) => {
-                                    let _ = tx2.send(api::ServerEvent::Status {
-                                        text: format!("Error: {e}"),
-                                    });
-                                }
-                            }
-                        }
-                        Intent::Reply { message } => {
-                            let room = state2
-                                .lock()
-                                .await
-                                .focused_room
-                                .clone()
-                                .unwrap_or_else(|| default_room.clone());
-                            match matrix2.send(&room, &message).await {
-                                Ok(_) => {
-                                    let _ = tx2.send(api::ServerEvent::Status {
-                                        text: format!("Replied in {room}"),
-                                    });
-                                }
-                                Err(e) => {
-                                    let _ = tx2.send(api::ServerEvent::Status {
-                                        text: format!("Error: {e}"),
-                                    });
-                                }
-                            }
-                        }
-                        Intent::Focus { room_alias } => {
-                            state2.lock().await.focused_room = Some(room_alias.clone());
+                if let Some(text) = pending {
+                    match matrix2.send(&default_room, &text).await {
+                        Ok(_) => {
                             let _ = tx2.send(api::ServerEvent::Status {
-                                text: format!("Now watching: {room_alias}"),
+                                text: "Sent".into(),
                             });
                         }
-                        Intent::Check => {
-                            let s = state2.lock().await;
-                            let msgs = s.messages_for_focused();
-                            let summary = msgs
-                                .iter()
-                                .rev()
-                                .take(3)
-                                .map(|m| format!("{}: {}", m.sender, m.text))
-                                .collect::<Vec<_>>()
-                                .join(" | ");
+                        Err(e) => {
                             let _ = tx2.send(api::ServerEvent::Status {
-                                text: if summary.is_empty() {
-                                    "No messages".into()
-                                } else {
-                                    summary
-                                },
-                            });
-                        }
-                        Intent::Unknown(raw) => {
-                            let _ = tx2.send(api::ServerEvent::Status {
-                                text: format!("Unknown: {raw}"),
+                                text: format!("Error: {e}"),
                             });
                         }
                     }
