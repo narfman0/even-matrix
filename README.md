@@ -73,6 +73,29 @@ Sideload `plugin/dist/` via EvenHub developer mode → Install from file. Grant 
 
 The plugin's default server is `localhost:4000`. To override, set the `monocle_host` key in EvenHub local storage (format: `host:port`).
 
+**Loading on device via QR code**
+
+Run the dev server, then generate a QR code pointing at your machine's LAN IP:
+
+```bash
+cd plugin && npm run dev
+# in another terminal:
+evenhub qr --url "http://192.168.1.x:5173"
+```
+
+Scan the QR code in the Even app to install the plugin directly from your dev server. Replace `192.168.1.x` with your machine's actual LAN IP.
+
+**Packaging for release**
+
+Build the plugin and package it as an `.ehpk` file for distribution:
+
+```bash
+cd plugin && npm run build
+evenhub package
+```
+
+See the [EvenHub packaging reference](https://hub.evenrealities.com/docs/reference/packaging) for signing and submission details.
+
 **4. Develop with the simulator**
 
 ```bash
