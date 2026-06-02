@@ -9,7 +9,7 @@ import {
   OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
 
-const DEFAULT_HOST = 'srv.blastedstudios.com:4000'
+const DEFAULT_HOST = 'localhost:4000'
 const STORAGE_KEY_HOST = 'monocle_host'
 const CONTAINER_ID = 1
 
@@ -129,16 +129,24 @@ async function main() {
   }
 
   bridge.onEvenHubEvent(async (event) => {
-    if (event.listEvent?.eventType === OsEventTypeList.CLICK_EVENT) {
-      const name = event.listEvent.currentSelectItemName
-      const room = rooms.find(r => r.name === name)
-      if (room) {
-        selectedRoomId = room.id
-        send({ type: 'select_room', room_id: room.id })
+    if (event.listEvent) {
+      const et = event.listEvent.eventType
+      const isScroll = et === OsEventTypeList.SCROLL_TOP_EVENT || et === OsEventTypeList.SCROLL_BOTTOM_EVENT
+      if (!isScroll) {
+        const index = event.listEvent.currentSelectItemIndex ?? 0
+        const room = rooms[index]
+        if (room) {
+          selectedRoomId = room.id
+          send({ type: 'select_room', room_id: room.id })
+        }
       }
     }
-    if (event.sysEvent?.eventType === OsEventTypeList.DOUBLE_CLICK_EVENT && !recognizing) {
-      await startVoice()
+    if (event.sysEvent && view === 'messages') {
+      if (event.sysEvent.eventType === OsEventTypeList.DOUBLE_CLICK_EVENT && !recognizing) {
+        await startVoice()
+      } else if (event.sysEvent.eventType === undefined) {
+        await showRoomList()
+      }
     }
   })
 

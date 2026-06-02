@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-matrix-sdk = { version = "0.10", features = ["sqlite"] }
+matrix-sdk = { version = "0.10", default-features = false, features = ["native-tls"] }
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.5", features = ["cors"] }
 serde = { version = "1", features = ["derive"] }

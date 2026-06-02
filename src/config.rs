@@ -16,7 +16,6 @@ pub struct MatrixConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct G2Config {
     pub port: u16,
-    pub token: String,
 }
 
 impl Config {
@@ -38,7 +37,6 @@ password   = "hunter2"
 
 [g2]
 port  = 4000
-token = "changeme"
 "#;
 
     #[test]
@@ -54,7 +52,6 @@ token = "changeme"
         let bad = r#"
 [g2]
 port = 4000
-token = "x"
 "#;
         assert!(toml::from_str::<Config>(bad).is_err());
     }
