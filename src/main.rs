@@ -9,11 +9,8 @@ use matrix_sdk::{
     Room,
     ruma::events::room::message::{MessageType, OriginalSyncRoomMessageEvent},
 };
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, Mutex};
 use tracing::info;
 
@@ -30,37 +27,36 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let cfg = config::Config::load(&args.config)?;
 
-    let matrix = matrix::MatrixClient::connect(&cfg).await?;
+    let matrix = Arc::new(matrix::MatrixClient::connect(&cfg).await?);
     let (tx, _) = broadcast::channel::<api::ServerEvent>(64);
-
     let state = Arc::new(Mutex::new(session::SessionState::default()));
 
-    // Register Matrix message handler
+    // Cache incoming Matrix messages per room_id for history browsing
     {
         let tx2 = tx.clone();
-        let alias_map: HashMap<String, String> = cfg
-            .rooms
-            .iter()
-            .map(|(alias, room_id)| (room_id.clone(), alias.clone()))
-            .collect();
+        let state2 = Arc::clone(&state);
 
         matrix.client().add_event_handler(
             move |ev: OriginalSyncRoomMessageEvent, room: Room| {
                 let tx3 = tx2.clone();
-                let alias_map2 = alias_map.clone();
+                let state3 = Arc::clone(&state2);
                 async move {
                     if let MessageType::Text(tc) = ev.content.msgtype {
-                        let room_id = room.room_id().as_str().to_string();
-                        let room_alias = alias_map2
-                            .get(&room_id)
-                            .cloned()
-                            .unwrap_or_else(|| room_id.clone());
+                        let room_id = room.room_id().to_string();
                         let ts = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs();
+                        let msg = session::CachedMessage {
+                            sender: ev.sender.to_string(),
+                            text: tc.body.clone(),
+                            ts,
+                        };
+                        state3.lock().await.push_message(&room_id, msg);
+
                         let _ = tx3.send(api::ServerEvent::Message {
-                            room_alias,
+                            room_id: room_id.clone(),
+                            room_alias: room.name().unwrap_or(room_id),
                             sender: ev.sender.to_string(),
                             text: tc.body,
                             ts,
@@ -71,14 +67,12 @@ async fn main() -> Result<()> {
         );
     }
 
-    let matrix = Arc::new(matrix);
-
-    // Dispatch loop — sends every transcript as-is to the default room
+    // Dispatch loop — sends transcripts to selected room (or default)
     {
         let state2 = Arc::clone(&state);
         let tx2 = tx.clone();
         let matrix2 = Arc::clone(&matrix);
-        let default_room = cfg.rooms.keys().next().cloned().unwrap_or_default();
+        let default_room = matrix2.default_room_id().unwrap_or_default();
 
         tokio::spawn(async move {
             loop {
@@ -90,11 +84,16 @@ async fn main() -> Result<()> {
                 };
 
                 if let Some(text) = pending {
-                    match matrix2.send(&default_room, &text).await {
+                    let room_id = state2
+                        .lock()
+                        .await
+                        .selected_room
+                        .clone()
+                        .unwrap_or_else(|| default_room.clone());
+
+                    match matrix2.send_to_room_id(&room_id, &text).await {
                         Ok(_) => {
-                            let _ = tx2.send(api::ServerEvent::Status {
-                                text: "Sent".into(),
-                            });
+                            let _ = tx2.send(api::ServerEvent::Status { text: "Sent".into() });
                         }
                         Err(e) => {
                             let _ = tx2.send(api::ServerEvent::Status {
@@ -107,7 +106,7 @@ async fn main() -> Result<()> {
         });
     }
 
-    // Start Matrix sync in background
+    // Matrix sync in background
     let sync_client = matrix.client().clone();
     tokio::spawn(async move {
         if let Err(e) = sync_client.sync(matrix::MatrixClient::sync_settings()).await {
@@ -115,9 +114,8 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Start WebSocket API server
     let port = cfg.g2.port;
-    let router = api::router(Arc::clone(&state), tx);
+    let router = api::router(Arc::clone(&state), tx, Arc::clone(&matrix));
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
     info!("G2 API listening on port {port}");
 
