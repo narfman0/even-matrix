@@ -1,102 +1,125 @@
 # monocle
 
-A lightweight Rust orchestrator that bridges smart glasses voice commands to Matrix messaging rooms.
+A Rust orchestrator that bridges G2 smart glasses to Matrix messaging rooms via the EvenHub platform.
 
-Say a command → it sends or reads a Matrix message → the response appears on your lens.
+Browse rooms, read message history, and send voice messages — all from your lens.
 
 ## How it works
 
 ```
-EvenHub plugin (phone)
-  — Web Speech API STT
+G2 glasses (EvenHub plugin)
+  — native list UI for room browsing
+  — Web Speech API for voice input
   — WebSocket to Rust server
         |
         v
-Rust orchestrator
-  — keyword intent routing
-  — matrix-sdk (HTTPS + E2EE-capable)
+Rust orchestrator (monocle)
+  — matrix-sdk login + sync
+  — room list, history, live messages
         |
         v
 Matrix homeserver (Synapse, Conduit, etc.)
 ```
 
-## Voice commands
+## Glasses UI
 
-| Say | Action |
-|-----|--------|
-| `tell wife I'm boarding` | Send to `wife` room |
-| `send to work server down` | Send to `work` room |
-| `reply sounds good` | Reply in focused room |
-| `switch to wife` / `focus work` | Change active room |
-| `check messages` | Summarise last 3 messages on lens |
+| Gesture | Action |
+|---------|--------|
+| Up / Down | Scroll room list |
+| Single tap | Enter room / back to room list |
+| Double tap | Start voice input (sends to current room) |
 
-Ring gestures: **single tap** → ping / **double tap** → start voice.
+Rooms are sorted alphabetically. Returning from a room restores cursor to the last-visited position.
 
 ## Setup
 
-**1. Get a Matrix access token**
+**1. Configure**
 
-```bash
-curl -XPOST https://matrix.example.com/_matrix/client/v3/login \
-  -H 'Content-Type: application/json' \
-  -d '{"type":"m.login.password","user":"you","password":"secret"}'
-```
-
-Copy `access_token` from the response.
-
-**2. Configure**
-
-```bash
-cp config.example.toml config.toml
-$EDITOR config.toml
-```
-
-Fill in homeserver, user_id, token, and your room aliases. Room IDs (`!abc:example.com`) are in your Matrix client's room settings.
-
-**3. Run the Rust server**
-
-Requires Rust 1.78+, OpenSSL/pkg-config on Linux.
-
-```bash
-cargo build --release
-./target/release/monocle --config config.toml
-```
-
-```bash
-RUST_LOG=debug cargo run -- --config config.toml
-```
-
-**4. Build the EvenHub plugin**
-
-```bash
-cd plugin && npm install && npm run build
-```
-
-Sideload `plugin/dist/` via EvenHub developer mode → Install from file. Grant network + microphone permissions. The plugin connects to `ws://localhost:4000/ws` — the Rust server and your phone must be on the same network (or use Tailscale).
-
-## Configuration reference
+Create `config.toml` (gitignored):
 
 ```toml
 [matrix]
 homeserver = "https://matrix.example.com"
 user_id    = "@you:example.com"
-token      = "syt_..."
-
-[rooms]
-default = "!abc:example.com"
-wife    = "!def:example.com"
-work    = "!ghi:example.com"
+password   = "yourpassword"
 
 [g2]
-port  = 4000      # WebSocket listen port
-token = "changeme" # reserved for future bearer auth
+port = 4000
 ```
+
+**2. Run the server**
+
+Requires Rust 1.78+.
+
+```bash
+cargo run
+# or for release
+cargo build --release && ./target/release/monocle
+```
+
+The server logs in, does an initial sync to populate the room cache, then listens on the configured port.
+
+```bash
+RUST_LOG=debug cargo run
+```
+
+**3. Build and load the EvenHub plugin**
+
+```bash
+cd plugin && npm install && npm run build
+```
+
+Sideload `plugin/dist/` via EvenHub developer mode → Install from file. Grant network + microphone permissions.
+
+The plugin's default server is `srv.blastedstudios.com:4000`. To override, set the `monocle_host` key in EvenHub local storage (format: `host:port`).
+
+**4. Develop with the simulator**
+
+```bash
+cd plugin && npm run dev
+# in another terminal:
+evenhub-simulator http://localhost:5173
+# or with automation API for scripted testing:
+evenhub-simulator http://localhost:5173 --automation-port 9898
+```
+
+## Configuration reference
+
+```toml
+[matrix]
+homeserver = "https://matrix.example.com"   # Matrix server URL
+user_id    = "@you:example.com"             # Full Matrix user ID
+password   = "yourpassword"                 # Matrix account password
+
+[g2]
+port = 4000   # WebSocket listen port
+```
+
+## WebSocket protocol
+
+**Client → Server**
+
+| Message | Fields | Description |
+|---------|--------|-------------|
+| `list_rooms` | — | Request room list |
+| `select_room` | `room_id` | Enter a room, receive history |
+| `transcript` | `text` | Send voice transcript to selected room |
+| `ping` | — | Keepalive |
+
+**Server → Client**
+
+| Event | Fields | Description |
+|-------|--------|-------------|
+| `room_list` | `rooms: [{id, name}]` | All joined rooms |
+| `history` | `room_id`, `messages: [{sender, text, ts}]` | Last 100 messages |
+| `message` | `room_id`, `room_alias`, `sender`, `text`, `ts` | Live incoming message |
+| `status` | `text` | Server status (e.g. "Sent") |
+| `pong` | — | Ping reply |
 
 ## Extending
 
-- **New voice commands**: edit `src/intent.rs` — pure keyword matching, no ML.
-- **New glasses platform**: replace the EvenHub plugin with any WS client that sends `{"type":"transcript","text":"..."}`.
-- **Persistent history**: `SessionState` in `src/session.rs` keeps 20 messages in RAM; swap in SQLite if needed.
+- **New glasses platform**: replace the EvenHub plugin with any WS client that sends `{"type":"transcript","text":"..."}` and handles the server events above.
+- **Persistent room cache**: `SessionState` in `src/session.rs` keeps 100 messages per room in RAM; swap in a store if needed.
 
 ## License
 
