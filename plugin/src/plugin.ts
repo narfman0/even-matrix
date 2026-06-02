@@ -18,7 +18,6 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
   let rooms: Array<{ id: string; name: string }> = []
   let displayedRooms: Array<{ id: string; name: string }> = []
   let selectedRoomId: string | null = null
-  let lastSelectedIndex = 0
   let lines: string[] = []
   let view: 'rooms' | 'messages' = 'rooms'
   let recognizing = false
@@ -122,7 +121,6 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
         const index = event.listEvent.currentSelectItemIndex ?? 0
         const room = displayedRooms[index]
         if (room) {
-          lastSelectedIndex = index
           selectedRoomId = room.id
           send({ type: 'select_room', room_id: room.id })
         }
@@ -138,7 +136,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
   }
 
   function getState() {
-    return { rooms, displayedRooms, selectedRoomId, lastSelectedIndex, lines, view, recognizing }
+    return { rooms, displayedRooms, selectedRoomId, lines, view, recognizing }
   }
 
   return { connect, showRoomList, showMessageView, appendLine, send, startVoice, handleEvenHubEvent, getState }

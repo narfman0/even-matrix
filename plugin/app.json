@@ -12,8 +12,8 @@
       "name": "network",
       "desc": "Connects to local monocle orchestrator for Matrix messaging",
       "whitelist": [
-        "http://localhost:4000",
-        "ws://localhost:4000"
+        "http://matrix.blastedstudios.com:4000",
+        "ws://matrix.blastedstudios.com:4000"
       ]
     },
     {

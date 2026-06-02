@@ -54,7 +54,7 @@ Plugin state machine:
 - **messages view**: `sysEvent` click (no eventType) → back to rooms view
 - **messages view**: `sysEvent` DOUBLE_CLICK → start voice → send `transcript`
 
-Rooms are sorted alphabetically. `displayedRooms` tracks the current sorted order (used to map click index → room id). `lastSelectedIndex` records the last clicked index for future cursor-restore support.
+Rooms are sorted alphabetically. `displayedRooms` tracks the current sorted order (used to map click index → room id).
 
 ## Changing the WebSocket protocol
 
