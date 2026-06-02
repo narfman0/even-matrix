@@ -17,7 +17,9 @@ async function main() {
   const bridge = await waitForEvenAppBridge()
 
   let rooms: Array<{ id: string; name: string }> = []
+  let displayedRooms: Array<{ id: string; name: string }> = []
   let selectedRoomId: string | null = null
+  let lastSelectedIndex = 0
   let lines: string[] = []
   let view: 'rooms' | 'messages' = 'rooms'
   let recognizing = false
@@ -37,7 +39,8 @@ async function main() {
 
   async function showRoomList() {
     view = 'rooms'
-    const names = rooms.slice(0, 20).map(r => r.name.slice(0, 64))
+    displayedRooms = [...rooms].sort((a, b) => a.name.localeCompare(b.name))
+    const names = displayedRooms.slice(0, 20).map(r => r.name.slice(0, 64))
     await bridge.rebuildPageContainer(new RebuildPageContainer({
       containerTotalNum: 1,
       listObject: [new ListContainerProperty({
@@ -134,8 +137,9 @@ async function main() {
       const isScroll = et === OsEventTypeList.SCROLL_TOP_EVENT || et === OsEventTypeList.SCROLL_BOTTOM_EVENT
       if (!isScroll) {
         const index = event.listEvent.currentSelectItemIndex ?? 0
-        const room = rooms[index]
+        const room = displayedRooms[index]
         if (room) {
+          lastSelectedIndex = index
           selectedRoomId = room.id
           send({ type: 'select_room', room_id: room.id })
         }
