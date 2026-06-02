@@ -71,7 +71,7 @@ cd plugin && npm install && npm run build
 
 Sideload `plugin/dist/` via EvenHub developer mode → Install from file. Grant network + microphone permissions.
 
-The plugin's default server is `srv.blastedstudios.com:4000`. To override, set the `monocle_host` key in EvenHub local storage (format: `host:port`).
+The plugin's default server is `localhost:4000`. To override, set the `monocle_host` key in EvenHub local storage (format: `host:port`).
 
 **4. Develop with the simulator**
 
