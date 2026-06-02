@@ -6,7 +6,7 @@ import {
 import { createPlugin } from './plugin'
 
 const CONTAINER_ID = 1
-const DEFAULT_HOST = 'matrix.blastedstudios.com:4000'
+const DEFAULT_HOST = 'srv.blastedstudios.com:4000'
 const STORAGE_KEY_HOST = 'monocle_host'
 
 async function main() {
