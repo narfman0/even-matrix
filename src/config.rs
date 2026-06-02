@@ -21,7 +21,11 @@ pub struct G2Config {
 impl Config {
     pub fn load(path: &str) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)?;
-        Ok(toml::from_str(&text)?)
+        let mut cfg: Self = toml::from_str(&text)?;
+        if let Ok(url) = std::env::var("MATRIX_HOMESERVER") {
+            cfg.matrix.homeserver = url;
+        }
+        Ok(cfg)
     }
 }
 
