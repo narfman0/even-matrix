@@ -7,8 +7,8 @@
       "name": "network",
       "desc": "Connects to local monocle orchestrator for Matrix messaging",
       "whitelist": [
-        "http://192.168.1.11:4000",
-        "ws://192.168.1.11:4000"
+        "http://srv.blastedstudios.com:4000",
+        "ws://srv.blastedstudios.com:4000"
       ]
     },
     {

@@ -3,87 +3,124 @@ import {
   TextContainerProperty,
   TextContainerUpgrade,
   CreateStartUpPageContainer,
+  ListContainerProperty,
+  ListItemContainerProperty,
+  RebuildPageContainer,
   OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
 
-const DEFAULT_HOST = '192.168.1.11:4000'
+const DEFAULT_HOST = 'srv.blastedstudios.com:4000'
 const STORAGE_KEY_HOST = 'monocle_host'
 const CONTAINER_ID = 1
-
-const mainText = new TextContainerProperty({
-  xPosition: 0,
-  yPosition: 0,
-  width: 576,
-  height: 288,
-  borderWidth: 0,
-  paddingLength: 4,
-  containerID: CONTAINER_ID,
-  containerName: 'main',
-  content: 'Connecting...',
-  isEventCapture: 1,
-})
 
 async function main() {
   const bridge = await waitForEvenAppBridge()
 
+  let rooms: Array<{ id: string; name: string }> = []
+  let selectedRoomId: string | null = null
+  let lines: string[] = []
+  let view: 'rooms' | 'messages' = 'rooms'
+  let recognizing = false
+  let ws: WebSocket | null = null
+
   await bridge.createStartUpPageContainer(
-    new CreateStartUpPageContainer({ containerTotalNum: 1, textObject: [mainText] })
+    new CreateStartUpPageContainer({
+      containerTotalNum: 1,
+      textObject: [new TextContainerProperty({
+        xPosition: 0, yPosition: 0, width: 576, height: 288,
+        borderWidth: 0, paddingLength: 4,
+        containerID: CONTAINER_ID, containerName: 'status',
+        content: 'Connecting...', isEventCapture: 1,
+      })],
+    })
   )
 
-  async function setText(content: string) {
-    await bridge.textContainerUpgrade(
-      new TextContainerUpgrade({ containerID: CONTAINER_ID, content })
-    )
+  async function showRoomList() {
+    view = 'rooms'
+    const names = rooms.slice(0, 20).map(r => r.name.slice(0, 64))
+    await bridge.rebuildPageContainer(new RebuildPageContainer({
+      containerTotalNum: 1,
+      listObject: [new ListContainerProperty({
+        xPosition: 0, yPosition: 0, width: 576, height: 288,
+        borderWidth: 0, paddingLength: 4,
+        containerID: CONTAINER_ID, containerName: 'rooms',
+        itemContainer: new ListItemContainerProperty({
+          itemCount: names.length,
+          itemName: names,
+          isItemSelectBorderEn: 1,
+        }),
+        isEventCapture: 1,
+      })],
+    }))
   }
 
-  const savedHost = await bridge.getLocalStorage(STORAGE_KEY_HOST).catch(() => '')
-  const host = savedHost || DEFAULT_HOST
-  const WS_URL = `ws://${host}/ws`
+  async function showMessageView(initialLines: string[]) {
+    lines = initialLines
+    view = 'messages'
+    await bridge.rebuildPageContainer(new RebuildPageContainer({
+      containerTotalNum: 1,
+      textObject: [new TextContainerProperty({
+        xPosition: 0, yPosition: 0, width: 576, height: 288,
+        borderWidth: 0, paddingLength: 4,
+        containerID: CONTAINER_ID, containerName: 'msgs',
+        content: lines.slice(-8).join('\n') || '(no messages)',
+        isEventCapture: 1,
+      })],
+    }))
+  }
 
-  let ws: WebSocket | null = null
-  let lines: string[] = []
-  let recognizing = false
-
-  function render() {
-    setText(lines.slice(-8).join('\n') || '(no messages)')
+  async function appendLine(line: string) {
+    lines.push(line)
+    if (view === 'messages') {
+      await bridge.textContainerUpgrade(new TextContainerUpgrade({
+        containerID: CONTAINER_ID,
+        content: lines.slice(-8).join('\n'),
+      }))
+    }
   }
 
   function send(msg: object) {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
   }
 
+  const savedHost = await bridge.getLocalStorage(STORAGE_KEY_HOST).catch(() => '')
+  const host = savedHost || DEFAULT_HOST
+  const WS_URL = `ws://${host}/ws`
+
   function connect() {
     ws = new WebSocket(WS_URL)
-    ws.onopen = () => { lines = [`Connected to ${host}`]; render(); send({ type: 'list_rooms' }) }
-    ws.onmessage = (e) => {
+    ws.onopen = () => send({ type: 'list_rooms' })
+    ws.onmessage = async (e) => {
       const ev = JSON.parse(e.data)
       if (ev.type === 'room_list') {
-        lines = ['Rooms:', ...ev.rooms.map((r: { name: string }) => `  ${r.name}`)]
-        render()
+        rooms = ev.rooms
+        await showRoomList()
+      } else if (ev.type === 'history') {
+        const histLines: string[] = ev.messages.map(
+          (m: { sender: string; text: string }) => `${m.sender}: ${m.text}`
+        )
+        await showMessageView(histLines)
       } else if (ev.type === 'message') {
-        lines.push(`${ev.sender}: ${ev.text}`)
-        render()
+        if (ev.room_id === selectedRoomId) await appendLine(`${ev.sender}: ${ev.text}`)
       } else if (ev.type === 'status') {
-        lines.push(ev.text)
-        render()
+        if (view === 'messages') await appendLine(ev.text)
       }
     }
-    ws.onclose = () => { lines = ['Disconnected, retrying...']; render(); setTimeout(connect, 3000) }
-    ws.onerror = () => { lines = ['WebSocket error']; render() }
+    ws.onclose = () => setTimeout(connect, 3000)
   }
 
-  function startVoice() {
+  async function startVoice() {
     const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
-    if (!SR) { lines.push('No STT'); render(); return }
+    if (!SR) { await appendLine('No STT'); return }
     const rec = new SR()
-    rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1
+    rec.lang = 'en-US'
+    rec.interimResults = false
+    rec.maxAlternatives = 1
     recognizing = true
-    lines.push('Listening...')
-    render()
-    rec.onresult = (e: any) => {
+    await appendLine('Listening...')
+    rec.onresult = async (e: any) => {
       const t: string = e.results[0][0].transcript
-      lines.push(`> ${t}`)
-      render()
+      await appendLine(`> ${t}`)
       send({ type: 'transcript', text: t })
     }
     rec.onend = () => { recognizing = false }
@@ -92,9 +129,17 @@ async function main() {
   }
 
   bridge.onEvenHubEvent(async (event) => {
-    const sys = event.sysEvent
-    if (!sys) return
-    if (sys.eventType === OsEventTypeList.DOUBLE_CLICK_EVENT && !recognizing) startVoice()
+    if (event.listEvent?.eventType === OsEventTypeList.CLICK_EVENT) {
+      const name = event.listEvent.currentSelectItemName
+      const room = rooms.find(r => r.name === name)
+      if (room) {
+        selectedRoomId = room.id
+        send({ type: 'select_room', room_id: room.id })
+      }
+    }
+    if (event.sysEvent?.eventType === OsEventTypeList.DOUBLE_CLICK_EVENT && !recognizing) {
+      await startVoice()
+    }
   })
 
   connect()

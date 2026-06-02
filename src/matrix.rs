@@ -39,6 +39,9 @@ impl MatrixClient {
             })
             .collect();
 
+        // Populate the room cache before accepting any connections.
+        client.sync_once(SyncSettings::default()).await?;
+
         info!("Matrix connected as {}", cfg.matrix.user_id);
         Ok(Self { client, room_map })
     }
