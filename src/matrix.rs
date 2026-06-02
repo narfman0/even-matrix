@@ -8,13 +8,10 @@ use matrix_sdk::{
         events::room::message::RoomMessageEventContent,
     },
 };
-use std::collections::HashMap;
 use tracing::info;
 
 pub struct MatrixClient {
     client: Client,
-    /// alias → room_id (for config-defined aliases only)
-    room_map: HashMap<String, OwnedRoomId>,
 }
 
 impl MatrixClient {
@@ -31,19 +28,11 @@ impl MatrixClient {
             .send()
             .await?;
 
-        let room_map: HashMap<String, OwnedRoomId> = cfg
-            .rooms
-            .iter()
-            .filter_map(|(alias, id_str)| {
-                id_str.parse::<OwnedRoomId>().ok().map(|id| (alias.clone(), id))
-            })
-            .collect();
-
         // Populate the room cache before accepting any connections.
         client.sync_once(SyncSettings::default()).await?;
 
         info!("Matrix connected as {}", cfg.matrix.user_id);
-        Ok(Self { client, room_map })
+        Ok(Self { client })
     }
 
     /// Returns all joined rooms as (room_id, display_name) pairs.
@@ -59,7 +48,16 @@ impl MatrixClient {
             .collect()
     }
 
-    /// Send a message to a room by its ID directly.
+    /// Returns the first joined room's ID as the default for voice sends.
+    pub fn default_room_id(&self) -> Option<String> {
+        self.client
+            .joined_rooms()
+            .into_iter()
+            .next()
+            .map(|r| r.room_id().to_string())
+    }
+
+    /// Send a message to a room by its ID.
     pub async fn send_to_room_id(&self, room_id: &str, message: &str) -> Result<()> {
         let id: OwnedRoomId = room_id.parse()?;
         let room = self
@@ -69,19 +67,6 @@ impl MatrixClient {
         room.send(RoomMessageEventContent::text_plain(message)).await?;
         info!("Sent to {room_id}: {message}");
         Ok(())
-    }
-
-    /// Send a message to a configured room alias.
-    pub async fn send(&self, room_alias: &str, message: &str) -> Result<()> {
-        let room_id = self
-            .room_map
-            .get(room_alias)
-            .ok_or_else(|| anyhow::anyhow!("Unknown room alias: {room_alias}"))?;
-        self.send_to_room_id(room_id.as_str(), message).await
-    }
-
-    pub fn default_room_id(&self) -> Option<String> {
-        self.room_map.values().next().map(|id| id.to_string())
     }
 
     pub fn client(&self) -> &Client {
