@@ -1,4 +1,5 @@
 use crate::{matrix::MatrixClient, session::SessionState};
+use tower_http::cors::CorsLayer;
 use axum::{
     extract::{
         State, WebSocketUpgrade,
@@ -66,6 +67,7 @@ pub enum ServerEvent {
 pub fn router(state: SharedState, tx: EventTx, matrix: SharedMatrix) -> Router {
     Router::new()
         .route("/ws", get(ws_handler))
+        .layer(CorsLayer::permissive())
         .with_state((state, tx, matrix))
 }
 
