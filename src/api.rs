@@ -107,7 +107,6 @@ async fn handle_socket(
                 match serde_json::from_str::<ClientMsg>(&text) {
                     Ok(ClientMsg::AudioStart) => {
                         audio_buf.clear();
-                        let _ = tx.send(ServerEvent::Status { text: "Listening...".into() });
                     }
                     Ok(ClientMsg::AudioEnd) => {
                         match &whisper {

@@ -139,7 +139,8 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
       } else if (et === OsEventTypeList.DOUBLE_CLICK_EVENT && !recognizing) {
         await startAudio()
       } else if (et === undefined) {
-        await showRoomList()
+        if (recognizing) await stopAudio()
+        else await showRoomList()
       }
     }
   }

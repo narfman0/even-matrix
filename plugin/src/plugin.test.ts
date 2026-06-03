@@ -304,7 +304,7 @@ describe('handleEvenHubEvent', () => {
     expect(bridge.audioControl).not.toHaveBeenCalledWith(true)
   })
 
-  it('back gesture (undefined sysEvent type) shows room list', async () => {
+  it('back gesture (undefined sysEvent type) shows room list when not recording', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
@@ -312,6 +312,20 @@ describe('handleEvenHubEvent', () => {
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: undefined } })
     expect(bridge.rebuildPageContainer).toHaveBeenCalled()
     expect(plugin.getState().view).toBe('rooms')
+  })
+
+  it('back gesture while recording stops audio instead of navigating away', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
+    bridge.rebuildPageContainer.mockClear()
+    bridge.audioControl.mockClear()
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: undefined } })
+    expect(bridge.audioControl).toHaveBeenCalledWith(false)
+    expect(plugin.getState().recognizing).toBe(false)
+    expect(plugin.getState().view).toBe('messages')
+    expect(bridge.rebuildPageContainer).not.toHaveBeenCalled()
   })
 
   it('sysEvent ignored when view is rooms', async () => {
