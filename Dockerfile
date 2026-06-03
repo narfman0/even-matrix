@@ -9,8 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       cmake g++ clang libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && echo 'fn main() {}' > src/main.rs \
+    && cargo build --release --bin monocle \
+    && rm -rf src
 COPY src ./src
-RUN cargo build --release --bin monocle
+RUN touch src/main.rs && cargo build --release --bin monocle
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
