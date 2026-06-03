@@ -71,7 +71,7 @@ cd plugin && npm install && npm run build
 
 Sideload `plugin/dist/` via EvenHub developer mode → Install from file. Grant network + microphone permissions.
 
-The plugin's default server is `localhost:4000`. To override, set the `even-matrix_host` key in EvenHub local storage (format: `host:port`).
+The plugin's default server is `localhost:4000`. To override, set the `even_matrix_host` key in EvenHub local storage (format: `host:port`).
 
 **Loading on device via QR code**
 
