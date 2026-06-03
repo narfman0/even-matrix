@@ -333,18 +333,16 @@ describe('handleEvenHubEvent', () => {
     expect(plugin.getState().view).toBe('rooms')
   })
 
-  it('back gesture while recording stops audio instead of navigating away', async () => {
+  it('back gesture while recording stops audio and stays in messages view', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
-    bridge.rebuildPageContainer.mockClear()
     bridge.audioControl.mockClear()
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: undefined } })
     expect(bridge.audioControl).toHaveBeenCalledWith(false)
     expect(plugin.getState().recognizing).toBe(false)
     expect(plugin.getState().view).toBe('messages')
-    expect(bridge.rebuildPageContainer).not.toHaveBeenCalled()
   })
 
   it('sysEvent ignored when view is rooms', async () => {
@@ -517,6 +515,17 @@ describe('stopAudio', () => {
     ws.sent = []
     await plugin.stopAudio()
     expect(ws.sent).not.toContain(JSON.stringify({ type: 'audio_end' }))
+  })
+
+  it('re-renders messages view so user lands back in the room', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws, [{ sender: 'Alice', text: 'Hi' }])
+    await plugin.startAudio()
+    bridge.rebuildPageContainer.mockClear()
+    await plugin.stopAudio()
+    expect(bridge.rebuildPageContainer).toHaveBeenCalledOnce()
+    expect(plugin.getState().view).toBe('messages')
   })
 })
 

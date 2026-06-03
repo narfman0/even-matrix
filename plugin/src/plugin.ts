@@ -130,6 +130,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
       send({ type: 'audio_end' })
       audioStarted = false
     }
+    await showMessageView(lines)
   }
 
   async function startAudio() {
