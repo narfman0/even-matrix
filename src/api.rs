@@ -170,7 +170,7 @@ async fn handle_socket(
                         state.lock().await.selected_room = Some(room_id.clone());
 
                         // Respond from cache immediately so the UI transitions at once.
-                        let cached: Vec<HistMsg> = state
+                        let mut cached: Vec<HistMsg> = state
                             .lock()
                             .await
                             .messages_for_room(&room_id)
@@ -182,6 +182,7 @@ async fn handle_socket(
                                 ts: m.ts,
                             })
                             .collect();
+                        cached.sort_by_key(|m| m.ts);
                         let _ = tx.send(ServerEvent::History { room_id: room_id.clone(), messages: cached });
 
                         // Fetch full history from the homeserver in the background and
@@ -191,7 +192,8 @@ async fn handle_socket(
                         let room_id2 = room_id.clone();
                         tokio::spawn(async move {
                             match matrix2.fetch_history(&room_id2, 50).await {
-                                Ok(fetched) => {
+                                Ok(mut fetched) => {
+                                    fetched.sort_by_key(|m| m.ts);
                                     let messages = fetched
                                         .into_iter()
                                         .map(|m| HistMsg { event_id: m.event_id, sender: m.sender, text: m.text, ts: m.ts })
