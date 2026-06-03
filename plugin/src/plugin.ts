@@ -19,6 +19,20 @@ export interface Bridge {
   audioControl(open: boolean): Promise<boolean>
 }
 
+const DISPLAY_MAX_LINES = 8
+const DISPLAY_MAX_LINE_CHARS = 100
+const DISPLAY_MAX_BYTES = 990
+
+function buildContent(lines: string[]): string {
+  const truncated = lines
+    .slice(-DISPLAY_MAX_LINES)
+    .map(l => l.slice(0, DISPLAY_MAX_LINE_CHARS))
+  while (truncated.length > 0 && truncated.join('\n').length > DISPLAY_MAX_BYTES) {
+    truncated.shift()
+  }
+  return truncated.join('\n') || '(no messages)'
+}
+
 function pcmStats(pcm: Uint8Array): { sumSq: number; count: number } {
   const count = Math.floor(pcm.length / 2)
   if (count === 0) return { sumSq: 0, count: 0 }
@@ -77,7 +91,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
         xPosition: 0, yPosition: 0, width: 576, height: 288,
         borderWidth: 0, paddingLength: 4,
         containerID: CONTAINER_ID, containerName: 'msgs',
-        content: lines.slice(-8).join('\n') || '(no messages)',
+        content: buildContent(lines),
         isEventCapture: 1,
       })],
     }))
@@ -88,7 +102,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
     if (view === 'messages') {
       await bridge.textContainerUpgrade(new TextContainerUpgrade({
         containerID: CONTAINER_ID,
-        content: lines.slice(-8).join('\n'),
+        content: buildContent(lines),
       }))
     }
   }
