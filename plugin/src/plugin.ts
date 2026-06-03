@@ -47,6 +47,8 @@ function pcmStats(pcm: Uint8Array): { sumSq: number; count: number } {
 export function createPlugin(bridge: Bridge, wsUrl: string) {
   const useSpeechRecognition =
     typeof window !== 'undefined' &&
+    typeof window.location !== 'undefined' &&
+    window.location.hostname === 'localhost' &&
     ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
 
   let rooms: Array<{ id: string; name: string }> = []
