@@ -1,4 +1,4 @@
-use crate::{matrix::MatrixClient, session::SessionState};
+use crate::{matrix::MatrixClient, session::SessionState, transcribe::WhisperTranscriber};
 use tower_http::cors::CorsLayer;
 use axum::{
     extract::{
@@ -18,6 +18,7 @@ use tracing::{info, warn};
 pub type SharedState = Arc<Mutex<SessionState>>;
 pub type EventTx = broadcast::Sender<ServerEvent>;
 pub type SharedMatrix = Arc<MatrixClient>;
+pub type SharedWhisper = Option<Arc<WhisperTranscriber>>;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -25,6 +26,8 @@ pub enum ClientMsg {
     Transcript { text: String },
     ListRooms,
     SelectRoom { room_id: String },
+    AudioStart,
+    AudioEnd,
     Ping,
 }
 
@@ -64,18 +67,18 @@ pub enum ServerEvent {
     Pong,
 }
 
-pub fn router(state: SharedState, tx: EventTx, matrix: SharedMatrix) -> Router {
+pub fn router(state: SharedState, tx: EventTx, matrix: SharedMatrix, whisper: SharedWhisper) -> Router {
     Router::new()
         .route("/ws", get(ws_handler))
         .layer(CorsLayer::permissive())
-        .with_state((state, tx, matrix))
+        .with_state((state, tx, matrix, whisper))
 }
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
-    State((state, tx, matrix)): State<(SharedState, EventTx, SharedMatrix)>,
+    State((state, tx, matrix, whisper)): State<(SharedState, EventTx, SharedMatrix, SharedWhisper)>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state, tx, matrix))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, tx, matrix, whisper))
 }
 
 async fn handle_socket(
@@ -83,9 +86,11 @@ async fn handle_socket(
     state: SharedState,
     tx: EventTx,
     matrix: SharedMatrix,
+    whisper: SharedWhisper,
 ) {
     let (mut sink, mut stream) = socket.split();
     let mut rx = tx.subscribe();
+    let mut audio_buf: Vec<u8> = Vec::new();
 
     let forward = tokio::spawn(async move {
         while let Ok(ev) = rx.recv().await {
@@ -97,43 +102,94 @@ async fn handle_socket(
     });
 
     while let Some(Ok(msg)) = stream.next().await {
-        if let Message::Text(text) = msg {
-            match serde_json::from_str::<ClientMsg>(&text) {
-                Ok(ClientMsg::Transcript { text: transcript }) => {
-                    info!("Transcript: {transcript}");
-                    let _ = tx.send(ServerEvent::Status {
-                        text: format!("Heard: {transcript}"),
-                    });
-                    state.lock().await.last_transcript = Some(transcript);
+        match msg {
+            Message::Text(text) => {
+                match serde_json::from_str::<ClientMsg>(&text) {
+                    Ok(ClientMsg::AudioStart) => {
+                        audio_buf.clear();
+                        let _ = tx.send(ServerEvent::Status { text: "Listening...".into() });
+                    }
+                    Ok(ClientMsg::AudioEnd) => {
+                        match &whisper {
+                            Some(w) => {
+                                let bytes = std::mem::take(&mut audio_buf);
+                                let w = Arc::clone(w);
+                                let tx2 = tx.clone();
+                                let state2 = Arc::clone(&state);
+                                tokio::spawn(async move {
+                                    let result = tokio::task::spawn_blocking(move || {
+                                        w.transcribe(&bytes)
+                                    })
+                                    .await;
+                                    match result {
+                                        Ok(Ok(t)) if !t.is_empty() => {
+                                            let _ = tx2.send(ServerEvent::Status {
+                                                text: format!("Heard: {t}"),
+                                            });
+                                            state2.lock().await.last_transcript = Some(t);
+                                        }
+                                        Ok(Ok(_)) => {
+                                            let _ = tx2.send(ServerEvent::Status {
+                                                text: "Nothing heard".into(),
+                                            });
+                                        }
+                                        Ok(Err(e)) => {
+                                            warn!("Transcription error: {e}");
+                                            let _ = tx2.send(ServerEvent::Status {
+                                                text: "Transcription failed".into(),
+                                            });
+                                        }
+                                        Err(e) => warn!("Transcription task panicked: {e}"),
+                                    }
+                                });
+                            }
+                            None => {
+                                let _ = tx.send(ServerEvent::Status {
+                                    text: "No whisper model configured".into(),
+                                });
+                            }
+                        }
+                    }
+                    Ok(ClientMsg::Transcript { text: transcript }) => {
+                        info!("Transcript: {transcript}");
+                        let _ = tx.send(ServerEvent::Status {
+                            text: format!("Heard: {transcript}"),
+                        });
+                        state.lock().await.last_transcript = Some(transcript);
+                    }
+                    Ok(ClientMsg::ListRooms) => {
+                        let rooms = matrix
+                            .list_rooms()
+                            .into_iter()
+                            .map(|(id, name)| RoomInfo { id, name })
+                            .collect();
+                        let _ = tx.send(ServerEvent::RoomList { rooms });
+                    }
+                    Ok(ClientMsg::SelectRoom { room_id }) => {
+                        state.lock().await.selected_room = Some(room_id.clone());
+                        let messages = state
+                            .lock()
+                            .await
+                            .messages_for_room(&room_id)
+                            .into_iter()
+                            .map(|m| HistMsg {
+                                sender: m.sender.clone(),
+                                text: m.text.clone(),
+                                ts: m.ts,
+                            })
+                            .collect();
+                        let _ = tx.send(ServerEvent::History { room_id, messages });
+                    }
+                    Ok(ClientMsg::Ping) => {
+                        let _ = tx.send(ServerEvent::Pong);
+                    }
+                    Err(e) => warn!("Bad client msg: {e}"),
                 }
-                Ok(ClientMsg::ListRooms) => {
-                    let rooms = matrix
-                        .list_rooms()
-                        .into_iter()
-                        .map(|(id, name)| RoomInfo { id, name })
-                        .collect();
-                    let _ = tx.send(ServerEvent::RoomList { rooms });
-                }
-                Ok(ClientMsg::SelectRoom { room_id }) => {
-                    state.lock().await.selected_room = Some(room_id.clone());
-                    let messages = state
-                        .lock()
-                        .await
-                        .messages_for_room(&room_id)
-                        .into_iter()
-                        .map(|m| HistMsg {
-                            sender: m.sender.clone(),
-                            text: m.text.clone(),
-                            ts: m.ts,
-                        })
-                        .collect();
-                    let _ = tx.send(ServerEvent::History { room_id, messages });
-                }
-                Ok(ClientMsg::Ping) => {
-                    let _ = tx.send(ServerEvent::Pong);
-                }
-                Err(e) => warn!("Bad client msg: {e}"),
             }
+            Message::Binary(bytes) => {
+                audio_buf.extend_from_slice(&bytes);
+            }
+            _ => {}
         }
     }
 

@@ -8,10 +8,12 @@ import {
 } from '@evenrealities/even_hub_sdk'
 
 const CONTAINER_ID = 1
+const AUDIO_TIMEOUT_MS = 8_000
 
 export interface Bridge {
   rebuildPageContainer(c: any): Promise<any>
   textContainerUpgrade(c: any): Promise<any>
+  audioControl(open: boolean): Promise<boolean>
 }
 
 export function createPlugin(bridge: Bridge, wsUrl: string) {
@@ -72,6 +74,10 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
   }
 
+  function sendBinary(data: Uint8Array) {
+    if (ws?.readyState === WebSocket.OPEN) ws.send(data)
+  }
+
   function connect() {
     ws = new WebSocket(wsUrl)
     ws.onopen = () => send({ type: 'list_rooms' })
@@ -94,26 +100,26 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
     ws.onclose = () => setTimeout(connect, 3000)
   }
 
-  async function startVoice() {
-    const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
-    if (!SR) { await appendLine('No STT'); return }
-    const rec = new SR()
-    rec.lang = 'en-US'
-    rec.interimResults = false
-    rec.maxAlternatives = 1
+  async function stopAudio() {
+    recognizing = false
+    await bridge.audioControl(false)
+    send({ type: 'audio_end' })
+  }
+
+  async function startAudio() {
     recognizing = true
     await appendLine('Listening...')
-    rec.onresult = async (e: any) => {
-      const t: string = e.results[0][0].transcript
-      await appendLine(`> ${t}`)
-      send({ type: 'transcript', text: t })
-    }
-    rec.onend = () => { recognizing = false }
-    rec.onerror = () => { recognizing = false }
-    rec.start()
+    send({ type: 'audio_start' })
+    await bridge.audioControl(true)
+    setTimeout(async () => {
+      if (recognizing) await stopAudio()
+    }, AUDIO_TIMEOUT_MS)
   }
 
   async function handleEvenHubEvent(event: any) {
+    if (event.audioEvent) {
+      sendBinary(event.audioEvent.audioPcm)
+    }
     if (event.listEvent) {
       const et = event.listEvent.eventType
       const isScroll = et === OsEventTypeList.SCROLL_TOP_EVENT || et === OsEventTypeList.SCROLL_BOTTOM_EVENT
@@ -127,9 +133,12 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
       }
     }
     if (event.sysEvent && view === 'messages') {
-      if (event.sysEvent.eventType === OsEventTypeList.DOUBLE_CLICK_EVENT && !recognizing) {
-        await startVoice()
-      } else if (event.sysEvent.eventType === undefined) {
+      const et = event.sysEvent.eventType
+      if (recognizing && (et === OsEventTypeList.CLICK_EVENT || et === OsEventTypeList.DOUBLE_CLICK_EVENT)) {
+        await stopAudio()
+      } else if (et === OsEventTypeList.DOUBLE_CLICK_EVENT && !recognizing) {
+        await startAudio()
+      } else if (et === undefined) {
         await showRoomList()
       }
     }
@@ -139,5 +148,5 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
     return { rooms, displayedRooms, selectedRoomId, lines, view, recognizing }
   }
 
-  return { connect, showRoomList, showMessageView, appendLine, send, startVoice, handleEvenHubEvent, getState }
+  return { connect, showRoomList, showMessageView, appendLine, send, startAudio, stopAudio, handleEvenHubEvent, getState }
 }

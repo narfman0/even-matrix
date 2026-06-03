@@ -4,6 +4,12 @@ use serde::Deserialize;
 pub struct Config {
     pub matrix: MatrixConfig,
     pub g2: G2Config,
+    pub whisper: Option<WhisperConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct WhisperConfig {
+    pub model_path: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -24,6 +30,9 @@ impl Config {
         let mut cfg: Self = toml::from_str(&text)?;
         if let Ok(url) = std::env::var("MATRIX_HOMESERVER") {
             cfg.matrix.homeserver = url;
+        }
+        if let Ok(path) = std::env::var("WHISPER_MODEL_PATH") {
+            cfg.whisper = Some(WhisperConfig { model_path: path });
         }
         Ok(cfg)
     }

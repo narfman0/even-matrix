@@ -1,6 +1,7 @@
 mod config;
 mod matrix;
 mod session;
+mod transcribe;
 mod api;
 
 use anyhow::Result;
@@ -114,8 +115,21 @@ async fn main() -> Result<()> {
         }
     });
 
+    let whisper = cfg.whisper.as_ref().and_then(|w| {
+        match transcribe::WhisperTranscriber::new(&w.model_path) {
+            Ok(t) => {
+                info!("Whisper model loaded from {}", w.model_path);
+                Some(Arc::new(t))
+            }
+            Err(e) => {
+                tracing::warn!("Could not load whisper model: {e}");
+                None
+            }
+        }
+    });
+
     let port = cfg.g2.port;
-    let router = api::router(Arc::clone(&state), tx, Arc::clone(&matrix));
+    let router = api::router(Arc::clone(&state), tx, Arc::clone(&matrix), whisper);
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
     info!("G2 API listening on port {port}");
 

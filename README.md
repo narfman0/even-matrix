@@ -116,7 +116,31 @@ password   = "yourpassword"                 # Matrix account password
 
 [g2]
 port = 4000   # WebSocket listen port
+
+[whisper]
+model_path = "models/ggml-small.bin"        # optional; enables on-device STT
 ```
+
+Download a model with:
+
+```bash
+mkdir models
+curl -L -o models/ggml-small.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+```
+
+If `[whisper]` is omitted, voice input is disabled and the server logs a warning.
+
+The model path can also be set via the `WHISPER_MODEL_PATH` environment variable, which takes precedence over `config.toml` and enables whisper even if the `[whisper]` section is absent. This is the recommended approach for Docker:
+
+```bash
+mkdir models
+curl -L -o models/ggml-small.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+docker compose up
+```
+
+`docker-compose.yml` sets `WHISPER_MODEL_PATH=/app/models/ggml-small.bin` and mounts `./models` into the container automatically.
 
 ## WebSocket protocol
 

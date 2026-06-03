@@ -10,6 +10,7 @@ vi.mock('@evenrealities/even_hub_sdk', () => ({
   ListContainerProperty: vi.fn((opts: any) => opts),
   ListItemContainerProperty: vi.fn((opts: any) => opts),
   OsEventTypeList: {
+    CLICK_EVENT: 'CLICK',
     SCROLL_TOP_EVENT: 'SCROLL_TOP',
     SCROLL_BOTTOM_EVENT: 'SCROLL_BOTTOM',
     DOUBLE_CLICK_EVENT: 'DOUBLE_CLICK',
@@ -270,17 +271,37 @@ describe('handleEvenHubEvent', () => {
     expect(ws.sent).toHaveLength(0)
   })
 
-  it('double click in messages view starts voice', async () => {
-    const { plugin, ws } = makePlugin()
+  it('double click in messages view starts audio capture', async () => {
+    const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
-    const mockStart = vi.fn()
-    vi.stubGlobal('SpeechRecognition', vi.fn().mockReturnValue({
-      lang: '', interimResults: false, maxAlternatives: 1,
-      start: mockStart, onresult: null, onend: null, onerror: null,
-    }))
+    ws.sent = []
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
-    expect(mockStart).toHaveBeenCalled()
+    expect(bridge.audioControl).toHaveBeenCalledWith(true)
+    expect(ws.sent).toContain(JSON.stringify({ type: 'audio_start' }))
+    expect(plugin.getState().recognizing).toBe(true)
+  })
+
+  it('tap while recognizing stops audio', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
+    bridge.audioControl.mockClear()
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'CLICK' } })
+    expect(bridge.audioControl).toHaveBeenCalledWith(false)
+    expect(plugin.getState().recognizing).toBe(false)
+  })
+
+  it('double tap while recognizing stops audio instead of starting new', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
+    bridge.audioControl.mockClear()
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
+    expect(bridge.audioControl).toHaveBeenCalledWith(false)
+    expect(bridge.audioControl).not.toHaveBeenCalledWith(true)
   })
 
   it('back gesture (undefined sysEvent type) shows room list', async () => {
@@ -298,34 +319,99 @@ describe('handleEvenHubEvent', () => {
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: undefined } })
     expect(bridge.rebuildPageContainer).not.toHaveBeenCalled()
   })
-})
 
-// ─── startVoice ───────────────────────────────────────────────────────────────
-
-describe('startVoice', () => {
-  it('appends No STT when SpeechRecognition is unavailable', async () => {
+  it('audioEvent forwards PCM bytes as binary WebSocket frame', async () => {
     const { plugin, ws } = makePlugin()
     plugin.connect()
-    await goToMessages(ws)
-    vi.stubGlobal('SpeechRecognition', undefined)
-    vi.stubGlobal('webkitSpeechRecognition', undefined)
-    await plugin.startVoice()
-    expect(plugin.getState().lines).toContain('No STT')
+    const pcm = new Uint8Array([0x00, 0x01, 0x02, 0x03])
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcm } })
+    expect(ws.sentBinary).toHaveLength(1)
+    expect(ws.sentBinary[0]).toEqual(pcm)
   })
 
-  it('appends transcript line and sends it on speech result', async () => {
+  it('audioEvent does nothing when WebSocket is not open', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    ws.readyState = 0
+    const pcm = new Uint8Array([0x00, 0x01])
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcm } })
+    expect(ws.sentBinary).toHaveLength(0)
+  })
+})
+
+// ─── startAudio / stopAudio ───────────────────────────────────────────────────
+
+describe('startAudio', () => {
+  it('sends audio_start and calls audioControl(true)', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    ws.sent = []
+    await plugin.startAudio()
+    expect(ws.sent).toContain(JSON.stringify({ type: 'audio_start' }))
+    expect(bridge.audioControl).toHaveBeenCalledWith(true)
+  })
+
+  it('sets recognizing to true', async () => {
     const { plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
-    let capturedRec: any
-    vi.stubGlobal('SpeechRecognition', vi.fn().mockImplementation(() => {
-      capturedRec = { lang: '', interimResults: false, maxAlternatives: 1, start: vi.fn(), onresult: null, onend: null, onerror: null }
-      return capturedRec
-    }))
+    await plugin.startAudio()
+    expect(plugin.getState().recognizing).toBe(true)
+  })
+
+  it('appends Listening... to the display', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    expect(plugin.getState().lines).toContain('Listening...')
+  })
+
+  it('auto-stops after timeout sending audio_end', async () => {
+    vi.useFakeTimers()
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
     ws.sent = []
-    await plugin.startVoice()
-    await capturedRec.onresult({ results: [[{ transcript: 'hello world' }]] })
-    expect(plugin.getState().lines).toContain('> hello world')
-    expect(ws.sent).toContain(JSON.stringify({ type: 'transcript', text: 'hello world' }))
+    await plugin.startAudio()
+    await vi.runAllTimersAsync()
+    expect(bridge.audioControl).toHaveBeenCalledWith(false)
+    expect(ws.sent).toContain(JSON.stringify({ type: 'audio_end' }))
+    expect(plugin.getState().recognizing).toBe(false)
+  })
+
+  it('auto-stop is skipped if already stopped before timeout', async () => {
+    vi.useFakeTimers()
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    await plugin.stopAudio()
+    bridge.audioControl.mockClear()
+    await vi.runAllTimersAsync()
+    expect(bridge.audioControl).not.toHaveBeenCalled()
+  })
+})
+
+describe('stopAudio', () => {
+  it('calls audioControl(false) and sends audio_end', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    ws.sent = []
+    await plugin.stopAudio()
+    expect(bridge.audioControl).toHaveBeenCalledWith(false)
+    expect(ws.sent).toContain(JSON.stringify({ type: 'audio_end' }))
+  })
+
+  it('sets recognizing to false', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    await plugin.stopAudio()
+    expect(plugin.getState().recognizing).toBe(false)
   })
 })
