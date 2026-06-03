@@ -49,7 +49,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
   let displayedRooms: Array<{ id: string; name: string }> = []
   let selectedRoomId: string | null = null
   let lines: string[] = []
-  let view: 'rooms' | 'messages' = 'rooms'
+  let view: 'rooms' | 'messages' | 'listening' = 'rooms'
   let recognizing = false
   let ws: WebSocket | null = null
 
@@ -77,6 +77,20 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
           itemName: names,
           isItemSelectBorderEn: 1,
         }),
+        isEventCapture: 1,
+      })],
+    }))
+  }
+
+  async function showListeningView() {
+    view = 'listening'
+    await bridge.rebuildPageContainer(new RebuildPageContainer({
+      containerTotalNum: 1,
+      textObject: [new TextContainerProperty({
+        xPosition: 0, yPosition: 0, width: 576, height: 288,
+        borderWidth: 0, paddingLength: 4,
+        containerID: CONTAINER_ID, containerName: 'listening',
+        content: 'Listening...',
         isEventCapture: 1,
       })],
     }))
@@ -134,8 +148,6 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
         if (ev.event_id && seenEventIds.has(ev.event_id)) return
         if (ev.event_id) seenEventIds.add(ev.event_id)
         if (ev.room_id === selectedRoomId) await appendLine(`${ev.sender}: ${ev.text}`)
-      } else if (ev.type === 'status') {
-        if (view === 'messages') await appendLine(ev.text)
       }
     }
     ws.onclose = () => setTimeout(connect, 3000)
@@ -161,6 +173,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
     silenceSamples = 0
     audioStarted = false
     await bridge.audioControl(true)
+    await showListeningView()
     setTimeout(async () => {
       if (recognizing) await stopAudio()
     }, AUDIO_TIMEOUT_MS)
@@ -177,7 +190,6 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
           ambientRms = Math.sqrt(calibSumSq / calibSampleCount) / 32768
           calibrating = false
           audioStarted = true
-          await appendLine('Listening...')
           send({ type: 'audio_start' })
         }
       } else if (recognizing) {
@@ -207,11 +219,11 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
         }
       }
     }
-    if (event.sysEvent && view === 'messages') {
+    if (event.sysEvent && view === 'listening') {
+      await stopAudio()
+    } else if (event.sysEvent && view === 'messages') {
       const et = event.sysEvent.eventType
-      if (recognizing && (et === OsEventTypeList.CLICK_EVENT || et === OsEventTypeList.DOUBLE_CLICK_EVENT)) {
-        await stopAudio()
-      } else if (et === OsEventTypeList.DOUBLE_CLICK_EVENT && !recognizing) {
+      if (et === OsEventTypeList.DOUBLE_CLICK_EVENT) {
         await startAudio()
       } else if (et === OsEventTypeList.SCROLL_TOP_EVENT) {
         scrollOffset = Math.min(scrollOffset + SCROLL_STEP, Math.max(0, lines.length - 1))
@@ -226,8 +238,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
           content: buildContent(lines, scrollOffset),
         }))
       } else if (et === undefined) {
-        if (recognizing) await stopAudio()
-        else await showRoomList()
+        await showRoomList()
       }
     }
   }

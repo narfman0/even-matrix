@@ -252,20 +252,14 @@ describe('WebSocket onmessage', () => {
     expect(bridge.textContainerUpgrade).not.toHaveBeenCalled()
   })
 
-  it('status event appends line in messages view', async () => {
+  it('status events are ignored', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
     bridge.textContainerUpgrade.mockClear()
-    await ws.triggerMessage({ type: 'status', text: 'Connected' })
-    expect(bridge.textContainerUpgrade).toHaveBeenCalled()
-  })
-
-  it('status event ignored in rooms view', async () => {
-    const { bridge, plugin, ws } = makePlugin()
-    plugin.connect()
-    await ws.triggerMessage({ type: 'status', text: 'Connected' })
+    await ws.triggerMessage({ type: 'status', text: 'Heard: hello world' })
     expect(bridge.textContainerUpgrade).not.toHaveBeenCalled()
+    expect(plugin.getState().lines).not.toContain('Heard: hello world')
   })
 
   it('schedules reconnect 3s after close', () => {
@@ -302,28 +296,34 @@ describe('handleEvenHubEvent', () => {
     expect(ws.sent).toHaveLength(0)
   })
 
-  it('double click in messages view starts audio capture', async () => {
+  it('double click in messages view starts audio and shows listening screen', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
+    bridge.rebuildPageContainer.mockClear()
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
     expect(bridge.audioControl).toHaveBeenCalledWith(true)
     expect(plugin.getState().recognizing).toBe(true)
     expect(plugin.getState().calibrating).toBe(true)
+    expect(plugin.getState().view).toBe('listening')
+    const arg = bridge.rebuildPageContainer.mock.calls[0][0]
+    expect(arg.textObject[0].content).toBe('Listening...')
   })
 
-  it('tap while recognizing stops audio', async () => {
+  it('tap in listening view stops audio', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
+    expect(plugin.getState().view).toBe('listening')
     bridge.audioControl.mockClear()
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'CLICK' } })
     expect(bridge.audioControl).toHaveBeenCalledWith(false)
     expect(plugin.getState().recognizing).toBe(false)
+    expect(plugin.getState().view).toBe('messages')
   })
 
-  it('double tap while recognizing stops audio instead of starting new', async () => {
+  it('double tap in listening view stops audio instead of starting new', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
@@ -344,11 +344,12 @@ describe('handleEvenHubEvent', () => {
     expect(plugin.getState().view).toBe('rooms')
   })
 
-  it('back gesture while recording stops audio and stays in messages view', async () => {
+  it('back gesture in listening view stops audio and returns to messages', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
+    expect(plugin.getState().view).toBe('listening')
     bridge.audioControl.mockClear()
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: undefined } })
     expect(bridge.audioControl).toHaveBeenCalledWith(false)
@@ -478,7 +479,18 @@ describe('startAudio', () => {
     expect(plugin.getState().calibrating).toBe(true)
   })
 
-  it('does not send audio_start or show Listening... before calibration', async () => {
+  it('shows listening screen and sets view immediately', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    bridge.rebuildPageContainer.mockClear()
+    await plugin.startAudio()
+    expect(plugin.getState().view).toBe('listening')
+    const arg = bridge.rebuildPageContainer.mock.calls[0][0]
+    expect(arg.textObject[0].content).toBe('Listening...')
+  })
+
+  it('does not send audio_start before calibration', async () => {
     const { plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
@@ -488,7 +500,7 @@ describe('startAudio', () => {
     expect(plugin.getState().lines).not.toContain('Listening...')
   })
 
-  it('sends audio_start and shows Listening... after calibration', async () => {
+  it('sends audio_start after calibration without adding to lines', async () => {
     const { plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
@@ -496,7 +508,7 @@ describe('startAudio', () => {
     await plugin.startAudio()
     await completeCalibration(plugin)
     expect(ws.sent).toContain(JSON.stringify({ type: 'audio_start' }))
-    expect(plugin.getState().lines).toContain('Listening...')
+    expect(plugin.getState().lines).not.toContain('Listening...')
     expect(plugin.getState().calibrating).toBe(false)
   })
 
@@ -594,7 +606,7 @@ describe('stopAudio', () => {
     expect(ws.sent).not.toContain(JSON.stringify({ type: 'audio_end' }))
   })
 
-  it('re-renders messages view so user lands back in the room', async () => {
+  it('re-renders messages view at bottom so user lands back in the room', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws, [{ sender: 'Alice', text: 'Hi' }])
@@ -603,6 +615,7 @@ describe('stopAudio', () => {
     await plugin.stopAudio()
     expect(bridge.rebuildPageContainer).toHaveBeenCalledOnce()
     expect(plugin.getState().view).toBe('messages')
+    expect(plugin.getState().scrollOffset).toBe(0)
   })
 })
 
