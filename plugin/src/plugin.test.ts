@@ -362,6 +362,72 @@ describe('handleEvenHubEvent', () => {
     expect(bridge.rebuildPageContainer).not.toHaveBeenCalled()
   })
 
+  it('scroll up increases offset and shows older messages', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
+    await goToMessages(ws, messages)
+    bridge.textContainerUpgrade.mockClear()
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
+    expect(plugin.getState().scrollOffset).toBe(3)
+    const content = bridge.textContainerUpgrade.mock.calls[0][0].content
+    expect(content).toContain('A: msg0')
+    expect(content).not.toContain('A: msg9')
+  })
+
+  it('scroll down decreases offset back toward latest messages', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
+    await goToMessages(ws, messages)
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
+    bridge.textContainerUpgrade.mockClear()
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
+    expect(plugin.getState().scrollOffset).toBe(0)
+    const content = bridge.textContainerUpgrade.mock.calls[0][0].content
+    expect(content).toContain('A: msg9')
+  })
+
+  it('scroll offset does not go below zero', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
+    expect(plugin.getState().scrollOffset).toBe(0)
+  })
+
+  it('new messages do not update display while scrolled back', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
+    await goToMessages(ws, messages)
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
+    expect(plugin.getState().scrollOffset).toBeGreaterThan(0)
+    bridge.textContainerUpgrade.mockClear()
+    await plugin.appendLine('new message')
+    expect(bridge.textContainerUpgrade).not.toHaveBeenCalled()
+  })
+
+  it('new messages update display when at the bottom (offset 0)', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    bridge.textContainerUpgrade.mockClear()
+    await plugin.appendLine('new message')
+    expect(bridge.textContainerUpgrade).toHaveBeenCalledTimes(1)
+  })
+
+  it('entering a room resets scroll offset to 0', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
+    await goToMessages(ws, messages)
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
+    expect(plugin.getState().scrollOffset).toBe(3)
+    await plugin.showMessageView([])
+    expect(plugin.getState().scrollOffset).toBe(0)
+  })
+
   it('audioEvent forwards PCM bytes after calibration', async () => {
     const { plugin, ws } = makePlugin()
     plugin.connect()

@@ -21,9 +21,11 @@ export interface Bridge {
 
 const DISPLAY_MAX_LINES = 20
 const DISPLAY_MAX_BYTES = 990
+const SCROLL_STEP = 3
 
-function buildContent(lines: string[]): string {
-  const window = lines.slice(-DISPLAY_MAX_LINES)
+function buildContent(lines: string[], offset = 0): string {
+  const end = Math.max(0, lines.length - offset)
+  const window = lines.slice(Math.max(0, end - DISPLAY_MAX_LINES), end)
   while (window.length > 0 && window.join('\n').length > DISPLAY_MAX_BYTES) {
     window.shift()
   }
@@ -58,6 +60,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
   let silenceSamples = 0
   let audioStarted = false
   let seenEventIds: Set<string> = new Set()
+  let scrollOffset = 0
 
   async function showRoomList() {
     view = 'rooms'
@@ -81,6 +84,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
 
   async function showMessageView(initialLines: string[]) {
     lines = initialLines
+    scrollOffset = 0
     view = 'messages'
     await bridge.rebuildPageContainer(new RebuildPageContainer({
       containerTotalNum: 1,
@@ -96,7 +100,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
 
   async function appendLine(line: string) {
     lines.push(line)
-    if (view === 'messages') {
+    if (view === 'messages' && scrollOffset === 0) {
       await bridge.textContainerUpgrade(new TextContainerUpgrade({
         containerID: CONTAINER_ID,
         content: buildContent(lines),
@@ -209,6 +213,18 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
         await stopAudio()
       } else if (et === OsEventTypeList.DOUBLE_CLICK_EVENT && !recognizing) {
         await startAudio()
+      } else if (et === OsEventTypeList.SCROLL_TOP_EVENT) {
+        scrollOffset = Math.min(scrollOffset + SCROLL_STEP, Math.max(0, lines.length - 1))
+        await bridge.textContainerUpgrade(new TextContainerUpgrade({
+          containerID: CONTAINER_ID,
+          content: buildContent(lines, scrollOffset),
+        }))
+      } else if (et === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+        scrollOffset = Math.max(0, scrollOffset - SCROLL_STEP)
+        await bridge.textContainerUpgrade(new TextContainerUpgrade({
+          containerID: CONTAINER_ID,
+          content: buildContent(lines, scrollOffset),
+        }))
       } else if (et === undefined) {
         if (recognizing) await stopAudio()
         else await showRoomList()
@@ -217,7 +233,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
   }
 
   function getState() {
-    return { rooms, displayedRooms, selectedRoomId, lines, view, recognizing, calibrating, ambientRms }
+    return { rooms, displayedRooms, selectedRoomId, lines, view, recognizing, calibrating, ambientRms, scrollOffset }
   }
 
   return { connect, showRoomList, showMessageView, appendLine, send, startAudio, stopAudio, handleEvenHubEvent, getState }
