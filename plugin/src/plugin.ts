@@ -68,6 +68,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
   let seenEventIds: Set<string> = new Set()
   let scrollOffset = 0
   let currentRecognition: any = null
+  let listeningStartedAt = 0
 
   async function showRoomList() {
     view = 'rooms'
@@ -188,6 +189,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
 
   async function startAudio() {
     recognizing = true
+    listeningStartedAt = Date.now()
     await showListeningView()
     if (useSpeechRecognition) {
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -258,7 +260,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
         }
       }
     }
-    if (event.sysEvent && view === 'listening') {
+    if (event.sysEvent && view === 'listening' && Date.now() - listeningStartedAt > 1000) {
       await stopAudio()
     } else if (event.sysEvent && view === 'messages') {
       const et = event.sysEvent.eventType

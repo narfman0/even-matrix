@@ -310,25 +310,39 @@ describe('handleEvenHubEvent', () => {
     expect(arg.textObject[0].content).toBe('Listening...')
   })
 
-  it('tap in listening view stops audio', async () => {
+  it('tap in listening view stops audio after cooldown', async () => {
+    vi.useFakeTimers()
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
     expect(plugin.getState().view).toBe('listening')
     bridge.audioControl.mockClear()
+    // Within cooldown — click ignored (physical device race protection)
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'CLICK' } })
+    expect(bridge.audioControl).not.toHaveBeenCalled()
+    expect(plugin.getState().recognizing).toBe(true)
+    // After cooldown expires, click stops audio
+    vi.advanceTimersByTime(1001)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'CLICK' } })
     expect(bridge.audioControl).toHaveBeenCalledWith(false)
     expect(plugin.getState().recognizing).toBe(false)
     expect(plugin.getState().view).toBe('messages')
   })
 
-  it('double tap in listening view stops audio instead of starting new', async () => {
+  it('double click immediately after starting audio ignored (physical device race)', async () => {
+    vi.useFakeTimers()
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
     bridge.audioControl.mockClear()
+    // Rapid follow-up event — ignored within cooldown
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
+    expect(bridge.audioControl).not.toHaveBeenCalled()
+    expect(plugin.getState().recognizing).toBe(true)
+    // After cooldown, stops audio
+    vi.advanceTimersByTime(1001)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
     expect(bridge.audioControl).toHaveBeenCalledWith(false)
     expect(bridge.audioControl).not.toHaveBeenCalledWith(true)
@@ -345,12 +359,14 @@ describe('handleEvenHubEvent', () => {
   })
 
   it('back gesture in listening view stops audio and returns to messages', async () => {
+    vi.useFakeTimers()
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
     expect(plugin.getState().view).toBe('listening')
     bridge.audioControl.mockClear()
+    vi.advanceTimersByTime(1001)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: undefined } })
     expect(bridge.audioControl).toHaveBeenCalledWith(false)
     expect(plugin.getState().recognizing).toBe(false)
