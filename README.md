@@ -1,6 +1,8 @@
 # even-matrix
 
-A Rust orchestrator that bridges G2 smart glasses to Matrix messaging rooms via the EvenHub platform.
+Matrix messaging from your even glasses.
+
+A Rust server that bridges G2 smart glasses to Matrix messaging rooms via the EvenHub plugin.
 
 Browse rooms, read message history, and send voice messages — all from your lens.
 
@@ -10,10 +12,10 @@ Browse rooms, read message history, and send voice messages — all from your le
 G2 glasses (EvenHub plugin)
   — native list UI for room browsing
   — Web Speech API for voice input
-  — WebSocket to Rust server
+  — WebSocket to Rust bridge
         |
         v
-Rust orchestrator (even-matrix)
+Rust bridge (even-matrix)
   — matrix-sdk login + sync
   — room list, history, live messages
         |

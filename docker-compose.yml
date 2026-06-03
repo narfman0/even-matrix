@@ -1,5 +1,5 @@
 services:
-  # even-matrix — smart-glasses <-> Matrix orchestrator. Serves the EvenHub
+  # even-matrix — smart-glasses <-> Matrix bridge. Serves the EvenHub
   # plugin WebSocket on :4000. Secrets live in config.toml, which is
   # gitignored and mounted read-only at runtime (not baked into the image).
   even-matrix:

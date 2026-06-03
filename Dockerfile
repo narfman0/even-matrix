@@ -1,4 +1,4 @@
-# Multi-stage build for the even-matrix Rust orchestrator (axum WS server).
+# Multi-stage build for the even-matrix Rust bridge (axum WS server).
 # matrix-sdk links against OpenSSL on Linux, so the builder needs
 # pkg-config + libssl-dev and the runtime needs libssl3 + ca-certificates.
 
