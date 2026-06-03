@@ -674,6 +674,71 @@ describe('silence detection', () => {
   })
 })
 
+// ─── Auto-follow behavior ─────────────────────────────────────────────────────
+
+describe('auto-follow behavior', () => {
+  it('first history enters room at bottom with scrollOffset 0', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    // Start from rooms view
+    await seedRooms(ws, [{ id: 'r1', name: 'Room' }])
+    bridge.rebuildPageContainer.mockClear()
+    await goToMessages(ws, [{ sender: 'A', text: 'msg1' }])
+    expect(plugin.getState().view).toBe('messages')
+    expect(plugin.getState().scrollOffset).toBe(0)
+    // Full rebuild was called (not just upgrade)
+    expect(bridge.rebuildPageContainer).toHaveBeenCalledOnce()
+  })
+
+  it('second history at bottom updates display via textContainerUpgrade only', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws, [{ sender: 'A', text: 'first' }])
+    bridge.rebuildPageContainer.mockClear()
+    bridge.textContainerUpgrade.mockClear()
+    // Second history arrives while already in messages view at offset 0
+    await ws.triggerMessage({ type: 'history', messages: [{ sender: 'A', text: 'first' }, { sender: 'A', text: 'second' }] })
+    expect(bridge.rebuildPageContainer).not.toHaveBeenCalled()
+    expect(bridge.textContainerUpgrade).toHaveBeenCalledOnce()
+    expect(plugin.getState().lines).toContain('A: second')
+  })
+
+  it('second history while scrolled up updates lines silently without touching display', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
+    await goToMessages(ws, messages)
+    // Scroll up
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
+    expect(plugin.getState().scrollOffset).toBeGreaterThan(0)
+    bridge.rebuildPageContainer.mockClear()
+    bridge.textContainerUpgrade.mockClear()
+    // Second history arrives while scrolled up
+    const more = [...messages, { sender: 'A', text: 'new' }]
+    await ws.triggerMessage({ type: 'history', messages: more })
+    expect(bridge.rebuildPageContainer).not.toHaveBeenCalled()
+    expect(bridge.textContainerUpgrade).not.toHaveBeenCalled()
+    expect(plugin.getState().lines).toContain('A: new')
+    expect(plugin.getState().scrollOffset).toBeGreaterThan(0)
+  })
+
+  it('scrolling back to bottom after second-history-while-scrolled shows refreshed lines', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
+    await goToMessages(ws, messages)
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
+    const more = [...messages, { sender: 'A', text: 'latest' }]
+    await ws.triggerMessage({ type: 'history', messages: more })
+    bridge.textContainerUpgrade.mockClear()
+    // Scroll all the way back down to offset 0
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
+    expect(plugin.getState().scrollOffset).toBe(0)
+    const content = bridge.textContainerUpgrade.mock.calls[0][0].content
+    expect(content).toContain('A: latest')
+  })
+})
+
 // ─── Simulator STT path ───────────────────────────────────────────────────────
 
 function makeSimulatorPlugin() {

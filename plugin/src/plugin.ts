@@ -148,7 +148,17 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
         const histLines: string[] = ev.messages.map(
           (m: { sender: string; text: string }) => `${m.sender}: ${m.text}`
         )
-        await showMessageView(histLines)
+        if (view === 'messages') {
+          lines = histLines
+          if (scrollOffset === 0) {
+            await bridge.textContainerUpgrade(new TextContainerUpgrade({
+              containerID: CONTAINER_ID,
+              content: buildContent(lines),
+            }))
+          }
+        } else {
+          await showMessageView(histLines)
+        }
       } else if (ev.type === 'message') {
         if (ev.event_id && seenEventIds.has(ev.event_id)) return
         if (ev.event_id) seenEventIds.add(ev.event_id)
