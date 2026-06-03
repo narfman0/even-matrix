@@ -45,6 +45,10 @@ function pcmStats(pcm: Uint8Array): { sumSq: number; count: number } {
 }
 
 export function createPlugin(bridge: Bridge, wsUrl: string) {
+  const useSpeechRecognition =
+    typeof window !== 'undefined' &&
+    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
+
   let rooms: Array<{ id: string; name: string }> = []
   let displayedRooms: Array<{ id: string; name: string }> = []
   let selectedRoomId: string | null = null
@@ -61,6 +65,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
   let audioStarted = false
   let seenEventIds: Set<string> = new Set()
   let scrollOffset = 0
+  let currentRecognition: any = null
 
   async function showRoomList() {
     view = 'rooms'
@@ -155,32 +160,54 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
 
   async function stopAudio() {
     recognizing = false
-    calibrating = false
-    await bridge.audioControl(false)
-    if (audioStarted) {
-      send({ type: 'audio_end' })
-      audioStarted = false
+    if (useSpeechRecognition) {
+      currentRecognition?.stop()
+      currentRecognition = null
+    } else {
+      calibrating = false
+      await bridge.audioControl(false)
+      if (audioStarted) {
+        send({ type: 'audio_end' })
+        audioStarted = false
+      }
     }
     await showMessageView(lines)
   }
 
   async function startAudio() {
     recognizing = true
-    calibrating = true
-    calibSumSq = 0
-    calibSampleCount = 0
-    ambientRms = 0
-    silenceSamples = 0
-    audioStarted = false
-    await bridge.audioControl(true)
     await showListeningView()
+    if (useSpeechRecognition) {
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      const recognition = new SR()
+      recognition.continuous = false
+      recognition.interimResults = false
+      recognition.lang = 'en-US'
+      recognition.onresult = async (e: any) => {
+        const text = e.results[0][0].transcript
+        send({ type: 'transcript', text })
+        await stopAudio()
+      }
+      recognition.onend = async () => { if (recognizing) await stopAudio() }
+      recognition.onerror = async () => { if (recognizing) await stopAudio() }
+      recognition.start()
+      currentRecognition = recognition
+    } else {
+      calibrating = true
+      calibSumSq = 0
+      calibSampleCount = 0
+      ambientRms = 0
+      silenceSamples = 0
+      audioStarted = false
+      await bridge.audioControl(true)
+    }
     setTimeout(async () => {
       if (recognizing) await stopAudio()
     }, AUDIO_TIMEOUT_MS)
   }
 
   async function handleEvenHubEvent(event: any) {
-    if (event.audioEvent) {
+    if (event.audioEvent && !useSpeechRecognition) {
       const pcm: Uint8Array = event.audioEvent.audioPcm
       if (recognizing && calibrating) {
         const { sumSq, count } = pcmStats(pcm)
