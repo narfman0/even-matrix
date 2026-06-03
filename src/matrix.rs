@@ -18,6 +18,7 @@ use tracing::info;
 
 pub struct MatrixClient {
     client: Client,
+    hs_host: String,
 }
 
 impl MatrixClient {
@@ -37,8 +38,14 @@ impl MatrixClient {
         // Populate the room cache before accepting any connections.
         client.sync_once(SyncSettings::default()).await?;
 
+        let hs_host = cfg.matrix.homeserver
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .trim_end_matches('/')
+            .to_string();
+
         info!("Matrix connected as {}", cfg.matrix.user_id);
-        Ok(Self { client })
+        Ok(Self { client, hs_host })
     }
 
     /// Returns all joined rooms as (room_id, display_name) pairs.
@@ -79,6 +86,12 @@ impl MatrixClient {
         &self.client
     }
 
+    /// Trim a Matrix user ID for display.
+    /// Local users → localpart only; federated users → `localpart@server`.
+    pub fn display_sender(&self, user_id: &str) -> String {
+        display_sender(user_id, &self.hs_host)
+    }
+
     /// Fetch up to `limit` most-recent messages from the homeserver for a room.
     /// Returns messages in chronological order (oldest first).
     pub async fn fetch_history(&self, room_id: &str, limit: u32) -> Result<Vec<CachedMessage>> {
@@ -105,7 +118,8 @@ impl MatrixClient {
                         if let MessageType::Text(tc) = &orig.content.msgtype {
                             let ts = u64::from(orig.origin_server_ts.get()) / 1000;
                             Some(CachedMessage {
-                                sender: orig.sender.to_string(),
+                                event_id: orig.event_id.to_string(),
+                                sender: self.display_sender(&orig.sender.to_string()),
                                 text: tc.body.clone(),
                                 ts,
                             })
@@ -124,5 +138,34 @@ impl MatrixClient {
 
     pub fn sync_settings() -> SyncSettings {
         SyncSettings::default()
+    }
+}
+
+pub fn display_sender(user_id: &str, hs_host: &str) -> String {
+    let without_at = user_id.trim_start_matches('@');
+    match without_at.split_once(':') {
+        Some((local, server)) if server == hs_host => local.to_string(),
+        Some((local, server)) => format!("{local}@{server}"),
+        None => user_id.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_user_shows_only_localpart() {
+        assert_eq!(display_sender("@alice:matrix.example.com", "matrix.example.com"), "alice");
+    }
+
+    #[test]
+    fn federated_user_shows_localpart_at_server() {
+        assert_eq!(display_sender("@bob:other.org", "matrix.example.com"), "bob@other.org");
+    }
+
+    #[test]
+    fn malformed_user_id_passed_through() {
+        assert_eq!(display_sender("notamatrixid", "matrix.example.com"), "notamatrixid");
     }
 }

@@ -39,6 +39,7 @@ pub struct RoomInfo {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HistMsg {
+    pub event_id: String,
     pub sender: String,
     pub text: String,
     pub ts: u64,
@@ -48,6 +49,7 @@ pub struct HistMsg {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerEvent {
     Message {
+        event_id: String,
         room_id: String,
         room_alias: String,
         sender: String,
@@ -174,7 +176,7 @@ async fn handle_socket(
                             let messages = match matrix2.fetch_history(&room_id2, 50).await {
                                 Ok(fetched) => fetched
                                     .into_iter()
-                                    .map(|m| HistMsg { sender: m.sender, text: m.text, ts: m.ts })
+                                    .map(|m| HistMsg { event_id: m.event_id, sender: m.sender, text: m.text, ts: m.ts })
                                     .collect(),
                                 Err(e) => {
                                     warn!("fetch_history failed, using cache: {e}");
@@ -184,6 +186,7 @@ async fn handle_socket(
                                         .messages_for_room(&room_id2)
                                         .into_iter()
                                         .map(|m| HistMsg {
+                                            event_id: m.event_id.clone(),
                                             sender: m.sender.clone(),
                                             text: m.text.clone(),
                                             ts: m.ts,

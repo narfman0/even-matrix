@@ -4,6 +4,7 @@ const MAX_HISTORY: usize = 100;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CachedMessage {
+    pub event_id: String,
     pub sender: String,
     pub text: String,
     pub ts: u64,
@@ -41,7 +42,7 @@ mod tests {
     use super::*;
 
     fn msg(sender: &str, text: &str) -> CachedMessage {
-        CachedMessage { sender: sender.to_string(), text: text.to_string(), ts: 0 }
+        CachedMessage { event_id: String::new(), sender: sender.to_string(), text: text.to_string(), ts: 0 }
     }
 
     #[test]

@@ -46,6 +46,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
   let ambientRms = 0
   let silenceSamples = 0
   let audioStarted = false
+  let seenEventIds: Set<string> = new Set()
 
   async function showRoomList() {
     view = 'rooms'
@@ -109,11 +110,14 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
         rooms = ev.rooms
         await showRoomList()
       } else if (ev.type === 'history') {
+        seenEventIds = new Set(ev.messages.map((m: { event_id: string }) => m.event_id).filter(Boolean))
         const histLines: string[] = ev.messages.map(
           (m: { sender: string; text: string }) => `${m.sender}: ${m.text}`
         )
         await showMessageView(histLines)
       } else if (ev.type === 'message') {
+        if (ev.event_id && seenEventIds.has(ev.event_id)) return
+        if (ev.event_id) seenEventIds.add(ev.event_id)
         if (ev.room_id === selectedRoomId) await appendLine(`${ev.sender}: ${ev.text}`)
       } else if (ev.type === 'status') {
         if (view === 'messages') await appendLine(ev.text)
