@@ -40,6 +40,26 @@ async function goToMessages(ws: FakeWebSocket, messages: Array<{ sender: string;
   await ws.triggerMessage({ type: 'history', messages })
 }
 
+// PCM helpers — 16 kHz s16le mono
+
+/** Silent PCM: enough samples to finish calibration (4 000 samples = 8 000 bytes). */
+function calibPcm(): Uint8Array {
+  return new Uint8Array(4_000 * 2)
+}
+
+/** PCM chunk with constant amplitude; RMS = amplitude / 32768. */
+function pcmChunk(samples: number, amplitude: number): Uint8Array {
+  const buf = new Uint8Array(samples * 2)
+  const view = new DataView(buf.buffer)
+  for (let i = 0; i < samples; i++) view.setInt16(i * 2, amplitude, true)
+  return buf
+}
+
+/** Complete calibration with a silent baseline (ambient RMS ≈ 0, threshold = 0.01). */
+async function completeCalibration(plugin: ReturnType<typeof createPlugin>) {
+  await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: calibPcm() } })
+}
+
 // ─── showRoomList ─────────────────────────────────────────────────────────────
 
 describe('showRoomList', () => {
@@ -275,11 +295,10 @@ describe('handleEvenHubEvent', () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
-    ws.sent = []
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
     expect(bridge.audioControl).toHaveBeenCalledWith(true)
-    expect(ws.sent).toContain(JSON.stringify({ type: 'audio_start' }))
     expect(plugin.getState().recognizing).toBe(true)
+    expect(plugin.getState().calibrating).toBe(true)
   })
 
   it('tap while recognizing stops audio', async () => {
@@ -334,19 +353,37 @@ describe('handleEvenHubEvent', () => {
     expect(bridge.rebuildPageContainer).not.toHaveBeenCalled()
   })
 
-  it('audioEvent forwards PCM bytes as binary WebSocket frame', async () => {
+  it('audioEvent forwards PCM bytes after calibration', async () => {
     const { plugin, ws } = makePlugin()
     plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    await completeCalibration(plugin)
+    ws.sentBinary = []
     const pcm = new Uint8Array([0x00, 0x01, 0x02, 0x03])
     await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcm } })
     expect(ws.sentBinary).toHaveLength(1)
     expect(ws.sentBinary[0]).toEqual(pcm)
   })
 
+  it('audioEvent does not forward PCM during calibration', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    const pcm = new Uint8Array(100)
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcm } })
+    expect(ws.sentBinary).toHaveLength(0)
+  })
+
   it('audioEvent does nothing when WebSocket is not open', async () => {
     const { plugin, ws } = makePlugin()
     plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    await completeCalibration(plugin)
     ws.readyState = 0
+    ws.sentBinary = []
     const pcm = new Uint8Array([0x00, 0x01])
     await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcm } })
     expect(ws.sentBinary).toHaveLength(0)
@@ -356,43 +393,84 @@ describe('handleEvenHubEvent', () => {
 // ─── startAudio / stopAudio ───────────────────────────────────────────────────
 
 describe('startAudio', () => {
-  it('sends audio_start and calls audioControl(true)', async () => {
+  it('opens mic and sets recognizing immediately', async () => {
     const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    expect(bridge.audioControl).toHaveBeenCalledWith(true)
+    expect(plugin.getState().recognizing).toBe(true)
+    expect(plugin.getState().calibrating).toBe(true)
+  })
+
+  it('does not send audio_start or show Listening... before calibration', async () => {
+    const { plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
     ws.sent = []
     await plugin.startAudio()
+    expect(ws.sent).not.toContain(JSON.stringify({ type: 'audio_start' }))
+    expect(plugin.getState().lines).not.toContain('Listening...')
+  })
+
+  it('sends audio_start and shows Listening... after calibration', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    ws.sent = []
+    await plugin.startAudio()
+    await completeCalibration(plugin)
     expect(ws.sent).toContain(JSON.stringify({ type: 'audio_start' }))
-    expect(bridge.audioControl).toHaveBeenCalledWith(true)
-  })
-
-  it('sets recognizing to true', async () => {
-    const { plugin, ws } = makePlugin()
-    plugin.connect()
-    await goToMessages(ws)
-    await plugin.startAudio()
-    expect(plugin.getState().recognizing).toBe(true)
-  })
-
-  it('appends Listening... to the display', async () => {
-    const { plugin, ws } = makePlugin()
-    plugin.connect()
-    await goToMessages(ws)
-    await plugin.startAudio()
     expect(plugin.getState().lines).toContain('Listening...')
+    expect(plugin.getState().calibrating).toBe(false)
   })
 
-  it('auto-stops after timeout sending audio_end', async () => {
+  it('calibration accumulates across multiple small chunks', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    ws.sent = []
+    await plugin.startAudio()
+    // Send 4 chunks of 1000 samples each = 4000 total
+    const chunk = new Uint8Array(1_000 * 2)
+    for (let i = 0; i < 4; i++) {
+      await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: chunk } })
+    }
+    expect(ws.sent).toContain(JSON.stringify({ type: 'audio_start' }))
+  })
+
+  it('computes ambient RMS from calibration audio', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    // Calibrate with amplitude 3276 → RMS ≈ 0.1
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcmChunk(4_000, 3276) } })
+    expect(plugin.getState().ambientRms).toBeCloseTo(0.1, 2)
+  })
+
+  it('auto-stops after timeout', async () => {
     vi.useFakeTimers()
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
-    ws.sent = []
     await plugin.startAudio()
+    await completeCalibration(plugin)
     await vi.runAllTimersAsync()
     expect(bridge.audioControl).toHaveBeenCalledWith(false)
-    expect(ws.sent).toContain(JSON.stringify({ type: 'audio_end' }))
     expect(plugin.getState().recognizing).toBe(false)
+  })
+
+  it('auto-stop sends audio_end after calibration', async () => {
+    vi.useFakeTimers()
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    await completeCalibration(plugin)
+    ws.sent = []
+    await vi.runAllTimersAsync()
+    expect(ws.sent).toContain(JSON.stringify({ type: 'audio_end' }))
   })
 
   it('auto-stop is skipped if already stopped before timeout', async () => {
@@ -409,23 +487,90 @@ describe('startAudio', () => {
 })
 
 describe('stopAudio', () => {
-  it('calls audioControl(false) and sends audio_end', async () => {
+  it('turns off mic and clears recognizing', async () => {
     const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    bridge.audioControl.mockClear()
+    await plugin.stopAudio()
+    expect(bridge.audioControl).toHaveBeenCalledWith(false)
+    expect(plugin.getState().recognizing).toBe(false)
+  })
+
+  it('sends audio_end when calibration completed', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    await completeCalibration(plugin)
+    ws.sent = []
+    await plugin.stopAudio()
+    expect(ws.sent).toContain(JSON.stringify({ type: 'audio_end' }))
+  })
+
+  it('does not send audio_end when stopped before calibration', async () => {
+    const { plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
     await plugin.startAudio()
     ws.sent = []
     await plugin.stopAudio()
+    expect(ws.sent).not.toContain(JSON.stringify({ type: 'audio_end' }))
+  })
+})
+
+// ─── Silence detection ────────────────────────────────────────────────────────
+
+describe('silence detection', () => {
+  it('stops recording after sustained silence', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    await completeCalibration(plugin)  // ambient = 0, threshold = 0.01
+    // 24 000 silent samples triggers auto-stop
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: new Uint8Array(24_000 * 2) } })
+    expect(plugin.getState().recognizing).toBe(false)
     expect(bridge.audioControl).toHaveBeenCalledWith(false)
-    expect(ws.sent).toContain(JSON.stringify({ type: 'audio_end' }))
   })
 
-  it('sets recognizing to false', async () => {
+  it('does not stop during speech above threshold', async () => {
     const { plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
     await plugin.startAudio()
-    await plugin.stopAudio()
+    await completeCalibration(plugin)
+    // amplitude 1000 → RMS ≈ 0.030 > threshold 0.01
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcmChunk(24_000, 1_000) } })
+    expect(plugin.getState().recognizing).toBe(true)
+  })
+
+  it('resets silence counter when speech is detected', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    await completeCalibration(plugin)
+    // 12 000 silent samples (half the threshold)
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: new Uint8Array(12_000 * 2) } })
+    expect(plugin.getState().recognizing).toBe(true)
+    // Speech resets counter
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcmChunk(160, 1_000) } })
+    // 12 000 more silent samples — should not stop (counter was reset)
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: new Uint8Array(12_000 * 2) } })
+    expect(plugin.getState().recognizing).toBe(true)
+  })
+
+  it('silence threshold scales with ambient RMS', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await goToMessages(ws)
+    await plugin.startAudio()
+    // Calibrate with amplitude 1638 → RMS ≈ 0.05, threshold = max(0.01, 0.10) = 0.10
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcmChunk(4_000, 1_638) } })
+    // amplitude 1000 → RMS ≈ 0.030 — below threshold of 0.10, counts as silence
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcmChunk(24_000, 1_000) } })
     expect(plugin.getState().recognizing).toBe(false)
   })
 })
