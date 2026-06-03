@@ -7,7 +7,7 @@ import { createPlugin } from './plugin'
 
 const CONTAINER_ID = 1
 const DEFAULT_HOST = 'srv:4000'
-const STORAGE_KEY_HOST = 'monocle_host'
+const STORAGE_KEY_HOST = 'even_matrix_host'
 
 async function main() {
   const bridge = await waitForEvenAppBridge()

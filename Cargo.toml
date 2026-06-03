@@ -1,10 +1,10 @@
 [package]
-name = "monocle"
+name = "even-matrix"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "monocle"
+name = "even-matrix"
 path = "src/main.rs"
 
 [dependencies]

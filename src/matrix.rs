@@ -31,7 +31,7 @@ impl MatrixClient {
         client
             .matrix_auth()
             .login_username(&cfg.matrix.user_id, &cfg.matrix.password)
-            .initial_device_display_name("monocle")
+            .initial_device_display_name("even-matrix")
             .send()
             .await?;
 

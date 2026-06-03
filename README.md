@@ -1,4 +1,4 @@
-# monocle
+# even-matrix
 
 A Rust orchestrator that bridges G2 smart glasses to Matrix messaging rooms via the EvenHub platform.
 
@@ -13,7 +13,7 @@ G2 glasses (EvenHub plugin)
   — WebSocket to Rust server
         |
         v
-Rust orchestrator (monocle)
+Rust orchestrator (even-matrix)
   — matrix-sdk login + sync
   — room list, history, live messages
         |
@@ -54,7 +54,7 @@ Requires Rust 1.78+.
 ```bash
 cargo run
 # or for release
-cargo build --release && ./target/release/monocle
+cargo build --release && ./target/release/even-matrix
 ```
 
 The server logs in, does an initial sync to populate the room cache, then listens on the configured port.
@@ -71,7 +71,7 @@ cd plugin && npm install && npm run build
 
 Sideload `plugin/dist/` via EvenHub developer mode → Install from file. Grant network + microphone permissions.
 
-The plugin's default server is `localhost:4000`. To override, set the `monocle_host` key in EvenHub local storage (format: `host:port`).
+The plugin's default server is `localhost:4000`. To override, set the `even-matrix_host` key in EvenHub local storage (format: `host:port`).
 
 **Loading on device via QR code**
 

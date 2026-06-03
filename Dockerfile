@@ -1,4 +1,4 @@
-# Multi-stage build for the monocle Rust orchestrator (axum WS server).
+# Multi-stage build for the even-matrix Rust orchestrator (axum WS server).
 # matrix-sdk links against OpenSSL on Linux, so the builder needs
 # pkg-config + libssl-dev and the runtime needs libssl3 + ca-certificates.
 
@@ -10,17 +10,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs \
-    && cargo build --release --bin monocle \
+    && cargo build --release --bin even-matrix \
     && rm -rf src
 COPY src ./src
-RUN touch src/main.rs && cargo build --release --bin monocle
+RUN touch src/main.rs && cargo build --release --bin even-matrix
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates libssl3 libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=builder /app/target/release/monocle ./monocle
+COPY --from=builder /app/target/release/even-matrix ./even-matrix
 EXPOSE 4000
 # config.toml is mounted at runtime (see docker-compose.yml); never baked in.
-ENTRYPOINT ["./monocle", "--config", "config.toml"]
+ENTRYPOINT ["./even-matrix", "--config", "config.toml"]

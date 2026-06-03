@@ -767,6 +767,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "even-matrix"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "futures",
+ "matrix-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+ "whisper-rs",
+]
+
+[[package]]
 name = "event-listener"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1744,25 +1763,6 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "monocle"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "clap",
- "futures",
- "matrix-sdk",
- "serde",
- "serde_json",
- "tokio",
- "toml",
- "tower-http 0.5.2",
- "tracing",
- "tracing-subscriber",
- "whisper-rs",
 ]
 
 [[package]]
