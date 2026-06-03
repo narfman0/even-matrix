@@ -168,33 +168,38 @@ async fn handle_socket(
                     }
                     Ok(ClientMsg::SelectRoom { room_id }) => {
                         state.lock().await.selected_room = Some(room_id.clone());
+
+                        // Respond from cache immediately so the UI transitions at once.
+                        let cached: Vec<HistMsg> = state
+                            .lock()
+                            .await
+                            .messages_for_room(&room_id)
+                            .into_iter()
+                            .map(|m| HistMsg {
+                                event_id: m.event_id.clone(),
+                                sender: m.sender.clone(),
+                                text: m.text.clone(),
+                                ts: m.ts,
+                            })
+                            .collect();
+                        let _ = tx.send(ServerEvent::History { room_id: room_id.clone(), messages: cached });
+
+                        // Fetch full history from the homeserver in the background and
+                        // send a second History update if we get more/different messages.
                         let tx2 = tx.clone();
                         let matrix2 = Arc::clone(&matrix);
-                        let state2 = Arc::clone(&state);
                         let room_id2 = room_id.clone();
                         tokio::spawn(async move {
-                            let messages = match matrix2.fetch_history(&room_id2, 50).await {
-                                Ok(fetched) => fetched
-                                    .into_iter()
-                                    .map(|m| HistMsg { event_id: m.event_id, sender: m.sender, text: m.text, ts: m.ts })
-                                    .collect(),
-                                Err(e) => {
-                                    warn!("fetch_history failed, using cache: {e}");
-                                    state2
-                                        .lock()
-                                        .await
-                                        .messages_for_room(&room_id2)
+                            match matrix2.fetch_history(&room_id2, 50).await {
+                                Ok(fetched) => {
+                                    let messages = fetched
                                         .into_iter()
-                                        .map(|m| HistMsg {
-                                            event_id: m.event_id.clone(),
-                                            sender: m.sender.clone(),
-                                            text: m.text.clone(),
-                                            ts: m.ts,
-                                        })
-                                        .collect()
+                                        .map(|m| HistMsg { event_id: m.event_id, sender: m.sender, text: m.text, ts: m.ts })
+                                        .collect();
+                                    let _ = tx2.send(ServerEvent::History { room_id: room_id2, messages });
                                 }
-                            };
-                            let _ = tx2.send(ServerEvent::History { room_id: room_id2, messages });
+                                Err(e) => warn!("fetch_history failed: {e}"),
+                            }
                         });
                     }
                     Ok(ClientMsg::Ping) => {
