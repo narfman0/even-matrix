@@ -4,6 +4,18 @@ mod session;
 mod transcribe;
 mod api;
 
+/// Trim a Matrix user ID for display.
+/// Local users (`@alice:home.server`) → `alice`.
+/// Federated users (`@bob:other.org`) → `bob@other.org`.
+fn display_sender(user_id: &str, hs_host: &str) -> String {
+    let without_at = user_id.trim_start_matches('@');
+    match without_at.split_once(':') {
+        Some((local, server)) if server == hs_host => local.to_string(),
+        Some((local, server)) => format!("{local}@{server}"),
+        None => user_id.to_string(),
+    }
+}
+
 use anyhow::Result;
 use clap::Parser;
 use matrix_sdk::{
@@ -32,15 +44,23 @@ async fn main() -> Result<()> {
     let (tx, _) = broadcast::channel::<api::ServerEvent>(64);
     let state = Arc::new(Mutex::new(session::SessionState::default()));
 
+    let hs_host = cfg.matrix.homeserver
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_string();
+
     // Cache incoming Matrix messages per room_id for history browsing
     {
         let tx2 = tx.clone();
         let state2 = Arc::clone(&state);
+        let hs_host2 = hs_host.clone();
 
         matrix.client().add_event_handler(
             move |ev: OriginalSyncRoomMessageEvent, room: Room| {
                 let tx3 = tx2.clone();
                 let state3 = Arc::clone(&state2);
+                let hs = hs_host2.clone();
                 async move {
                     if let MessageType::Text(tc) = ev.content.msgtype {
                         let room_id = room.room_id().to_string();
@@ -48,8 +68,9 @@ async fn main() -> Result<()> {
                             .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs();
+                        let sender = display_sender(&ev.sender.to_string(), &hs);
                         let msg = session::CachedMessage {
-                            sender: ev.sender.to_string(),
+                            sender: sender.clone(),
                             text: tc.body.clone(),
                             ts,
                         };
@@ -58,7 +79,7 @@ async fn main() -> Result<()> {
                         let _ = tx3.send(api::ServerEvent::Message {
                             room_id: room_id.clone(),
                             room_alias: room.name().unwrap_or(room_id),
-                            sender: ev.sender.to_string(),
+                            sender,
                             text: tc.body,
                             ts,
                         });
@@ -135,4 +156,30 @@ async fn main() -> Result<()> {
 
     axum::serve(listener, router).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_user_shows_only_localpart() {
+        assert_eq!(display_sender("@alice:matrix.example.com", "matrix.example.com"), "alice");
+    }
+
+    #[test]
+    fn federated_user_shows_localpart_at_server() {
+        assert_eq!(display_sender("@bob:other.org", "matrix.example.com"), "bob@other.org");
+    }
+
+    #[test]
+    fn homeserver_with_trailing_slash_still_matches() {
+        // hs_host is pre-trimmed before being passed in, but guard against it
+        assert_eq!(display_sender("@alice:home.server", "home.server"), "alice");
+    }
+
+    #[test]
+    fn malformed_user_id_passed_through() {
+        assert_eq!(display_sender("notamatrixid", "matrix.example.com"), "notamatrixid");
+    }
 }
