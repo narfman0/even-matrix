@@ -108,8 +108,8 @@ describe('showMessageView', () => {
     const arg = bridge.rebuildPageContainer.mock.calls[0][0]
     const lines = arg.textObject[0].content.split('\n')
     expect(lines).toHaveLength(10)
-    expect(lines[0]).toBe('A: msg0')
-    expect(lines[9]).toBe('A: msg9')
+    expect(lines[0]).toBe('A: msg9')
+    expect(lines[9]).toBe('A: msg0')
   })
 
   it('drops oldest lines when byte budget is exceeded', async () => {
@@ -121,7 +121,7 @@ describe('showMessageView', () => {
     const arg = bridge.rebuildPageContainer.mock.calls[0][0]
     const content = arg.textObject[0].content
     expect(content.length).toBeLessThanOrEqual(990)
-    expect(content.endsWith(`A: 7:${longMsg}`)).toBe(true)
+    expect(content.startsWith(`A: 7:${longMsg}`)).toBe(true)
   })
 
   it('shows fallback when no messages', async () => {
@@ -174,7 +174,7 @@ describe('appendLine', () => {
     await plugin.appendLine(`new:${longMsg}`)
     const arg = bridge.textContainerUpgrade.mock.calls[0][0]
     expect(arg.content.length).toBeLessThanOrEqual(990)
-    expect(arg.content.endsWith(`new:${longMsg}`)).toBe(true)
+    expect(arg.content.startsWith(`new:${longMsg}`)).toBe(true)
   })
 })
 
@@ -363,27 +363,27 @@ describe('handleEvenHubEvent', () => {
     expect(bridge.rebuildPageContainer).not.toHaveBeenCalled()
   })
 
-  it('scroll up increases offset and shows older messages', async () => {
+  it('scroll down goes into history', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
     await goToMessages(ws, messages)
     bridge.textContainerUpgrade.mockClear()
-    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
     expect(plugin.getState().scrollOffset).toBe(3)
     const content = bridge.textContainerUpgrade.mock.calls[0][0].content
     expect(content).toContain('A: msg0')
     expect(content).not.toContain('A: msg9')
   })
 
-  it('scroll down decreases offset back toward latest messages', async () => {
+  it('scroll up returns to latest messages', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
     await goToMessages(ws, messages)
-    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
-    bridge.textContainerUpgrade.mockClear()
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
+    bridge.textContainerUpgrade.mockClear()
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
     expect(plugin.getState().scrollOffset).toBe(0)
     const content = bridge.textContainerUpgrade.mock.calls[0][0].content
     expect(content).toContain('A: msg9')
@@ -393,23 +393,23 @@ describe('handleEvenHubEvent', () => {
     const { plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
-    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
     expect(plugin.getState().scrollOffset).toBe(0)
   })
 
-  it('new messages do not update display while scrolled back', async () => {
+  it('new messages do not update display while scrolled into history', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
     await goToMessages(ws, messages)
-    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
     expect(plugin.getState().scrollOffset).toBeGreaterThan(0)
     bridge.textContainerUpgrade.mockClear()
     await plugin.appendLine('new message')
     expect(bridge.textContainerUpgrade).not.toHaveBeenCalled()
   })
 
-  it('new messages update display when at the bottom (offset 0)', async () => {
+  it('new messages update display when at the top (offset 0)', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
@@ -423,7 +423,7 @@ describe('handleEvenHubEvent', () => {
     plugin.connect()
     const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
     await goToMessages(ws, messages)
-    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
     expect(plugin.getState().scrollOffset).toBe(3)
     await plugin.showMessageView([])
     expect(plugin.getState().scrollOffset).toBe(0)
@@ -703,13 +703,13 @@ describe('auto-follow behavior', () => {
     expect(plugin.getState().lines).toContain('A: second')
   })
 
-  it('second history while scrolled up updates lines silently without touching display', async () => {
+  it('second history while scrolled into history updates lines silently without touching display', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
     await goToMessages(ws, messages)
-    // Scroll up
-    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
+    // Scroll down into history
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
     expect(plugin.getState().scrollOffset).toBeGreaterThan(0)
     bridge.rebuildPageContainer.mockClear()
     bridge.textContainerUpgrade.mockClear()
@@ -722,17 +722,17 @@ describe('auto-follow behavior', () => {
     expect(plugin.getState().scrollOffset).toBeGreaterThan(0)
   })
 
-  it('scrolling back to bottom after second-history-while-scrolled shows refreshed lines', async () => {
+  it('scrolling back to latest after history-while-scrolled shows refreshed lines', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
     await goToMessages(ws, messages)
-    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
     const more = [...messages, { sender: 'A', text: 'latest' }]
     await ws.triggerMessage({ type: 'history', messages: more })
     bridge.textContainerUpgrade.mockClear()
-    // Scroll all the way back down to offset 0
-    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
+    // Scroll back up to offset 0 (latest)
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
     expect(plugin.getState().scrollOffset).toBe(0)
     const content = bridge.textContainerUpgrade.mock.calls[0][0].content
     expect(content).toContain('A: latest')

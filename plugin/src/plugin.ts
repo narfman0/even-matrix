@@ -25,11 +25,11 @@ const SCROLL_STEP = 3
 
 function buildContent(lines: string[], offset = 0): string {
   const end = Math.max(0, lines.length - offset)
-  const window = lines.slice(Math.max(0, end - DISPLAY_MAX_LINES), end)
-  while (window.length > 0 && window.join('\n').length > DISPLAY_MAX_BYTES) {
-    window.shift()
+  const slice = lines.slice(Math.max(0, end - DISPLAY_MAX_LINES), end).reverse()
+  while (slice.length > 0 && slice.join('\n').length > DISPLAY_MAX_BYTES) {
+    slice.pop()
   }
-  return window.join('\n') || '(no messages)'
+  return slice.join('\n') || '(no messages)'
 }
 
 function pcmStats(pcm: Uint8Array): { sumSq: number; count: number } {
@@ -262,13 +262,13 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
       const et = event.sysEvent.eventType
       if (et === OsEventTypeList.DOUBLE_CLICK_EVENT) {
         await startAudio()
-      } else if (et === OsEventTypeList.SCROLL_TOP_EVENT) {
+      } else if (et === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
         scrollOffset = Math.min(scrollOffset + SCROLL_STEP, Math.max(0, lines.length - 1))
         await bridge.textContainerUpgrade(new TextContainerUpgrade({
           containerID: CONTAINER_ID,
           content: buildContent(lines, scrollOffset),
         }))
-      } else if (et === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+      } else if (et === OsEventTypeList.SCROLL_TOP_EVENT) {
         scrollOffset = Math.max(0, scrollOffset - SCROLL_STEP)
         await bridge.textContainerUpgrade(new TextContainerUpgrade({
           containerID: CONTAINER_ID,
