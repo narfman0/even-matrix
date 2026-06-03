@@ -100,16 +100,28 @@ describe('showRoomList', () => {
 // ─── showMessageView ──────────────────────────────────────────────────────────
 
 describe('showMessageView', () => {
-  it('shows last 8 of more than 8 lines', async () => {
+  it('shows all lines up to DISPLAY_MAX_LINES', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
     await goToMessages(ws, messages)
     const arg = bridge.rebuildPageContainer.mock.calls[0][0]
     const lines = arg.textObject[0].content.split('\n')
-    expect(lines).toHaveLength(8)
-    expect(lines[0]).toBe('A: msg2')
-    expect(lines[7]).toBe('A: msg9')
+    expect(lines).toHaveLength(10)
+    expect(lines[0]).toBe('A: msg0')
+    expect(lines[9]).toBe('A: msg9')
+  })
+
+  it('drops oldest lines when byte budget is exceeded', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    const longMsg = 'x'.repeat(200)
+    const messages = Array.from({ length: 8 }, (_, i) => ({ sender: 'A', text: `${i}:${longMsg}` }))
+    await goToMessages(ws, messages)
+    const arg = bridge.rebuildPageContainer.mock.calls[0][0]
+    const content = arg.textObject[0].content
+    expect(content.length).toBeLessThanOrEqual(990)
+    expect(content.endsWith(`A: 7:${longMsg}`)).toBe(true)
   })
 
   it('shows fallback when no messages', async () => {
@@ -152,18 +164,17 @@ describe('appendLine', () => {
     expect(bridge.textContainerUpgrade).not.toHaveBeenCalled()
   })
 
-  it('limits upgrade content to last 8 lines', async () => {
+  it('drops oldest lines on upgrade when byte budget is exceeded', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
-    const messages = Array.from({ length: 8 }, (_, i) => ({ sender: 'A', text: `${i}` }))
+    const longMsg = 'x'.repeat(200)
+    const messages = Array.from({ length: 6 }, (_, i) => ({ sender: 'A', text: `${i}:${longMsg}` }))
     await goToMessages(ws, messages)
     bridge.textContainerUpgrade.mockClear()
-    await plugin.appendLine('new')
+    await plugin.appendLine(`new:${longMsg}`)
     const arg = bridge.textContainerUpgrade.mock.calls[0][0]
-    const lines = arg.content.split('\n')
-    expect(lines).toHaveLength(8)
-    expect(lines[0]).toBe('A: 1')
-    expect(lines[7]).toBe('new')
+    expect(arg.content.length).toBeLessThanOrEqual(990)
+    expect(arg.content.endsWith(`new:${longMsg}`)).toBe(true)
   })
 })
 

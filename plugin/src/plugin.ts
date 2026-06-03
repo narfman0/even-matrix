@@ -19,18 +19,15 @@ export interface Bridge {
   audioControl(open: boolean): Promise<boolean>
 }
 
-const DISPLAY_MAX_LINES = 8
-const DISPLAY_MAX_LINE_CHARS = 100
+const DISPLAY_MAX_LINES = 20
 const DISPLAY_MAX_BYTES = 990
 
 function buildContent(lines: string[]): string {
-  const truncated = lines
-    .slice(-DISPLAY_MAX_LINES)
-    .map(l => l.slice(0, DISPLAY_MAX_LINE_CHARS))
-  while (truncated.length > 0 && truncated.join('\n').length > DISPLAY_MAX_BYTES) {
-    truncated.shift()
+  const window = lines.slice(-DISPLAY_MAX_LINES)
+  while (window.length > 0 && window.join('\n').length > DISPLAY_MAX_BYTES) {
+    window.shift()
   }
-  return truncated.join('\n') || '(no messages)'
+  return window.join('\n') || '(no messages)'
 }
 
 function pcmStats(pcm: Uint8Array): { sumSq: number; count: number } {
