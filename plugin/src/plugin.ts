@@ -8,10 +8,6 @@ import {
 } from '@evenrealities/even_hub_sdk'
 
 const CONTAINER_ID = 1
-const AUDIO_TIMEOUT_MS = 8_000
-const CALIBRATION_SAMPLES = 4_000      // 16 kHz × 250 ms
-const SILENCE_DURATION_SAMPLES = 24_000 // 16 kHz × 1500 ms
-const SILENCE_THRESHOLD_MIN = 0.01
 
 export interface Bridge {
   rebuildPageContainer(c: any): Promise<any>
@@ -32,17 +28,6 @@ function buildContent(lines: string[], offset = 0): string {
   return slice.join('\n') || '(no messages)'
 }
 
-function pcmStats(pcm: Uint8Array): { sumSq: number; count: number } {
-  const count = Math.floor(pcm.length / 2)
-  if (count === 0) return { sumSq: 0, count: 0 }
-  const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength)
-  let sumSq = 0
-  for (let i = 0; i < count; i++) {
-    const s = view.getInt16(i * 2, true)
-    sumSq += s * s
-  }
-  return { sumSq, count }
-}
 
 export function createPlugin(bridge: Bridge, wsUrl: string) {
   const useSpeechRecognition =
@@ -59,11 +44,6 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
   let recognizing = false
   let ws: WebSocket | null = null
 
-  let calibrating = false
-  let calibSumSq = 0
-  let calibSampleCount = 0
-  let ambientRms = 0
-  let silenceSamples = 0
   let audioStarted = false
   let seenEventIds: Set<string> = new Set()
   let scrollOffset = 0
@@ -177,7 +157,6 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
       currentRecognition?.stop()
       currentRecognition = null
     } else {
-      calibrating = false
       await bridge.audioControl(false)
       if (audioStarted) {
         send({ type: 'audio_end' })
@@ -207,46 +186,15 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
       recognition.start()
       currentRecognition = recognition
     } else {
-      calibrating = true
-      calibSumSq = 0
-      calibSampleCount = 0
-      ambientRms = 0
-      silenceSamples = 0
-      audioStarted = false
+      audioStarted = true
+      send({ type: 'audio_start' })
       await bridge.audioControl(true)
     }
-    setTimeout(async () => {
-      if (recognizing) await stopAudio()
-    }, AUDIO_TIMEOUT_MS)
   }
 
   async function handleEvenHubEvent(event: any) {
-    if (event.audioEvent && !useSpeechRecognition) {
-      const pcm: Uint8Array = event.audioEvent.audioPcm
-      if (recognizing && calibrating) {
-        const { sumSq, count } = pcmStats(pcm)
-        calibSumSq += sumSq
-        calibSampleCount += count
-        if (calibSampleCount >= CALIBRATION_SAMPLES) {
-          ambientRms = Math.sqrt(calibSumSq / calibSampleCount) / 32768
-          calibrating = false
-          audioStarted = true
-          send({ type: 'audio_start' })
-        }
-      } else if (recognizing) {
-        sendBinary(pcm)
-        const { sumSq, count } = pcmStats(pcm)
-        const rms = count > 0 ? Math.sqrt(sumSq / count) / 32768 : 0
-        const threshold = Math.max(SILENCE_THRESHOLD_MIN, ambientRms * 2)
-        if (rms > threshold) {
-          silenceSamples = 0
-        } else {
-          silenceSamples += count
-          if (silenceSamples >= SILENCE_DURATION_SAMPLES) {
-            await stopAudio()
-          }
-        }
-      }
+    if (event.audioEvent && !useSpeechRecognition && recognizing) {
+      sendBinary(event.audioEvent.audioPcm)
     }
     if (event.listEvent) {
       const et = event.listEvent.eventType
@@ -285,7 +233,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string) {
   }
 
   function getState() {
-    return { rooms, displayedRooms, selectedRoomId, lines, view, recognizing, calibrating, ambientRms, scrollOffset }
+    return { rooms, displayedRooms, selectedRoomId, lines, view, recognizing, scrollOffset }
   }
 
   return { connect, showRoomList, showMessageView, appendLine, send, startAudio, stopAudio, handleEvenHubEvent, getState }
