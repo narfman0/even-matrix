@@ -92,8 +92,7 @@ Scan the QR code in the Even app to install the plugin directly from your dev se
 Build the plugin and package it as an `.ehpk` file for distribution:
 
 ```bash
-cd plugin && npm run build
-evenhub package
+cd plugin && npm run package
 ```
 
 See the [EvenHub packaging reference](https://hub.evenrealities.com/docs/reference/packaging) for signing and submission details.
