@@ -6,11 +6,10 @@
     CreateStartUpPageContainer,
   } from '@evenrealities/even_hub_sdk'
   import { createPlugin } from './plugin'
+  import { MatrixRestClient } from './matrix-client'
   import appJson from '../app.json'
 
   const CONTAINER_ID = 1
-  const DEFAULT_HOST = 'srv:4000'
-  const STORAGE_KEY_HOST = 'even_matrix_host'
   const APP_VERSION: string = appJson.version
 
   type Plugin = ReturnType<typeof createPlugin>
@@ -24,13 +23,18 @@
     view: 'rooms',
     recognizing: false,
     scrollOffset: 0,
-    wsConnected: false,
+    matrixConnected: false,
     errors: [],
+    syncToken: null,
   })
   let settingsOpen = $state(false)
-  let hostValue = $state(DEFAULT_HOST)
+  let hsValue = $state('')
+  let userValue = $state('')
+  let passValue = $state('')
+  let whisperValue = $state('')
   let saveStatus = $state('')
   let saveColor = $state('#888')
+  let msgInput = $state('')
 
   let plugin: Plugin | null = null
   let bridge: any = null
@@ -42,11 +46,36 @@
       .reverse()
   }
 
-  async function saveHost() {
+  async function saveCredentials() {
     try {
-      await bridge.setLocalStorage(STORAGE_KEY_HOST, hostValue.trim())
-      saveStatus = 'Saved. Reload to apply.'
+      const result = await MatrixRestClient.login(hsValue.trim(), userValue.trim(), passValue)
+      await bridge.setLocalStorage('even_matrix_homeserver', hsValue.trim())
+      await bridge.setLocalStorage('even_matrix_username', userValue.trim())
+      await bridge.setLocalStorage('even_matrix_access_token', result.access_token)
+      await bridge.setLocalStorage('even_matrix_user_id', result.user_id)
+      await bridge.setLocalStorage('even_matrix_device_id', result.device_id)
+      passValue = ''
+      saveStatus = 'Logged in. Reloading...'
       saveColor = '#4caf50'
+      setTimeout(() => window.location.reload(), 800)
+    } catch (e) {
+      saveStatus = `Login failed: ${e}`
+      saveColor = '#f44336'
+    }
+  }
+
+  async function sendText() {
+    if (!msgInput.trim()) return
+    await plugin?.sendMessage(msgInput.trim())
+    msgInput = ''
+  }
+
+  async function saveWhisper() {
+    try {
+      await bridge.setLocalStorage('even_matrix_whisper_url', whisperValue.trim())
+      saveStatus = 'Saved. Reloading...'
+      saveColor = '#4caf50'
+      setTimeout(() => window.location.reload(), 800)
     } catch {
       saveStatus = 'Save failed.'
       saveColor = '#f44336'
@@ -68,21 +97,36 @@
       })
     )
 
-    const savedHost = await bridge.getLocalStorage(STORAGE_KEY_HOST).catch(() => '')
-    const host = savedHost || DEFAULT_HOST
-    hostValue = host
+    const homeserver  = await bridge.getLocalStorage('even_matrix_homeserver').catch(() => '')
+    const accessToken = await bridge.getLocalStorage('even_matrix_access_token').catch(() => '')
+    const userId      = await bridge.getLocalStorage('even_matrix_user_id').catch(() => '')
+    const syncToken   = await bridge.getLocalStorage('even_matrix_sync_token').catch(() => null)
+    const whisperUrl  = await bridge.getLocalStorage('even_matrix_whisper_url').catch(() => null)
+    const savedUser   = await bridge.getLocalStorage('even_matrix_username').catch(() => '')
 
-    plugin = createPlugin(bridge, `ws://${host}/ws`, () => {
+    hsValue = homeserver
+    userValue = savedUser
+    whisperValue = whisperUrl ?? ''
+
+    if (!homeserver || !accessToken) {
+      settingsOpen = true
+      return
+    }
+
+    const matrix = new MatrixRestClient(homeserver, accessToken, userId)
+    plugin = createPlugin(bridge, matrix, whisperUrl || null, () => {
       state = plugin!.getState()
+      const { syncToken: tok } = plugin!.getState()
+      if (tok) bridge.setLocalStorage('even_matrix_sync_token', tok)
     })
     bridge.onEvenHubEvent(plugin.handleEvenHubEvent)
-    plugin.connect()
+    await plugin.start(syncToken)
   })
 </script>
 
 <div id="status-bar">
-  <span class="ws-status" class:connected={state.wsConnected} class:disconnected={!state.wsConnected}>
-    WS: {state.wsConnected ? 'connected' : 'disconnected'}
+  <span class="matrix-status" class:connected={state.matrixConnected} class:disconnected={!state.matrixConnected}>
+    {state.matrixConnected ? 'Matrix: connected' : 'Matrix: disconnected'}
   </span>
   <span id="view-label">{settingsOpen ? 'settings' : state.view}</span>
   <button id="settings-btn" title="Settings" onclick={() => (settingsOpen = !settingsOpen)}>
@@ -94,7 +138,11 @@
   <div id="controls">
     {#if state.view === 'messages'}
       <button class="ctrl-btn" onclick={() => plugin?.handleEvenHubEvent({ sysEvent: {} })}>Back</button>
-      <button class="ctrl-btn primary" onclick={() => plugin?.startAudio()}>Talk</button>
+      <input id="msg-input" type="text" placeholder="Type a message..."
+        bind:value={msgInput}
+        onkeydown={(e) => e.key === 'Enter' && sendText()} />
+      <button class="ctrl-btn primary" onclick={sendText}>Send</button>
+      <button class="ctrl-btn" onclick={() => plugin?.startAudio()}>🎤</button>
     {:else}
       <button class="ctrl-btn danger" onclick={() => plugin?.stopAudio()}>Stop</button>
     {/if}
@@ -109,9 +157,22 @@
       <span class="settings-value">v{APP_VERSION}</span>
     </div>
     <div class="settings-row">
-      <label class="settings-label" for="host-input">Home Server</label>
-      <input id="host-input" type="text" placeholder="srv:4000" bind:value={hostValue} />
-      <button id="save-host-btn" onclick={saveHost}>Save</button>
+      <label class="settings-label" for="hs-input">Homeserver</label>
+      <input id="hs-input" type="text" placeholder="https://matrix.example.com" bind:value={hsValue} />
+    </div>
+    <div class="settings-row">
+      <label class="settings-label" for="user-input">Username</label>
+      <input id="user-input" type="text" placeholder="alice" bind:value={userValue} />
+    </div>
+    <div class="settings-row">
+      <label class="settings-label" for="pass-input">Password</label>
+      <input id="pass-input" type="password" bind:value={passValue} />
+      <button class="save-btn" onclick={saveCredentials}>Login</button>
+    </div>
+    <div class="settings-row">
+      <label class="settings-label" for="whisper-input">Whisper URL</label>
+      <input id="whisper-input" type="text" placeholder="http://whisper-server:8080 (optional)" bind:value={whisperValue} />
+      <button class="save-btn" onclick={saveWhisper}>Save</button>
     </div>
     <div id="save-status" style="color: {saveColor}">{saveStatus}</div>
     <div id="error-log">
@@ -162,9 +223,9 @@
     padding: 6px 12px; background: #222; border-bottom: 1px solid #333;
     position: sticky; top: 0; z-index: 10;
   }
-  .ws-status { font-size: 12px; }
-  .ws-status.connected { color: #4caf50; }
-  .ws-status.disconnected { color: #f44336; }
+  .matrix-status { font-size: 12px; }
+  .matrix-status.connected { color: #4caf50; }
+  .matrix-status.disconnected { color: #f44336; }
   #view-label { font-size: 12px; color: #888; }
   #settings-btn {
     background: none; border: none; color: #888; font-size: 16px;
@@ -209,6 +270,12 @@
   .ctrl-btn:active { background: #3a3a3a; }
   .ctrl-btn.primary { border-color: #4caf50; color: #4caf50; }
   .ctrl-btn.danger  { border-color: #f44336; color: #f44336; }
+  #msg-input {
+    flex: 1; min-width: 0; background: #1e1e1e; border: 1px solid #444; color: #eee;
+    font-family: monospace; font-size: 13px; padding: 5px 8px;
+    border-radius: 4px; outline: none;
+  }
+  #msg-input:focus { border-color: #666; }
   #settings-panel { padding: 12px; }
   .settings-heading {
     font-size: 13px; color: #aaa; font-weight: bold;
@@ -221,18 +288,18 @@
   }
   .settings-label { font-size: 12px; color: #888; min-width: 80px; }
   .settings-value { font-size: 12px; color: #ccc; }
-  #host-input {
+  #hs-input, #user-input, #pass-input, #whisper-input {
     flex: 1; background: #1e1e1e; border: 1px solid #444; color: #eee;
     font-family: monospace; font-size: 12px; padding: 4px 8px;
     border-radius: 4px; outline: none;
   }
-  #host-input:focus { border-color: #666; }
-  #save-host-btn {
+  #hs-input:focus, #user-input:focus, #pass-input:focus, #whisper-input:focus { border-color: #666; }
+  .save-btn {
     padding: 4px 10px; border-radius: 4px; border: 1px solid #4caf50;
     background: #1a2e1a; color: #4caf50; font-family: monospace; font-size: 12px;
     cursor: pointer;
   }
-  #save-host-btn:active { background: #2a3e2a; }
+  .save-btn:active { background: #2a3e2a; }
   #save-status { font-size: 11px; margin-bottom: 12px; min-height: 16px; }
   #error-log { margin-top: 16px; border-top: 1px solid #333; padding-top: 10px; }
   #error-log h3 { font-size: 11px; color: #888; margin-bottom: 6px; }

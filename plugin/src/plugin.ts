@@ -6,6 +6,7 @@ import {
   RebuildPageContainer,
   OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
+import type { MatrixClient, MatrixMessage, RoomHierarchy, RoomInfo, SpaceInfo } from './matrix-client'
 
 const CONTAINER_ID = 1
 
@@ -19,9 +20,6 @@ const DISPLAY_MAX_LINES = 20
 const DISPLAY_MAX_BYTES = 990
 const SCROLL_STEP = 3
 
-interface RoomInfo { id: string; name: string }
-interface SpaceInfo { id: string; name: string; rooms: RoomInfo[] }
-interface RoomHierarchy { dms: RoomInfo[]; spaces: SpaceInfo[]; orphans: RoomInfo[] }
 type DisplayItem = RoomInfo & { isHeader: boolean }
 
 function buildDisplayedRooms(h: RoomHierarchy): DisplayItem[] {
@@ -62,19 +60,62 @@ function buildContent(lines: string[], offset = 0): string {
   return slice.join('\n') || '(no messages)'
 }
 
+function mergeChunks(chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((n, c) => n + c.length, 0)
+  const merged = new Uint8Array(totalLength)
+  let offset = 0
+  for (const chunk of chunks) {
+    merged.set(chunk, offset)
+    offset += chunk.length
+  }
+  return merged
+}
 
-export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => void) {
+function pcmToWav(pcm: Uint8Array, sampleRate: number): Uint8Array {
+  const numChannels = 1
+  const bitsPerSample = 16
+  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8
+  const blockAlign = (numChannels * bitsPerSample) / 8
+  const dataSize = pcm.length
+  const buf = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buf)
+  const writeStr = (off: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i))
+  }
+  writeStr(0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  writeStr(8, 'WAVE')
+  writeStr(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, numChannels, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, byteRate, true)
+  view.setUint16(32, blockAlign, true)
+  view.setUint16(34, bitsPerSample, true)
+  writeStr(36, 'data')
+  view.setUint32(40, dataSize, true)
+  new Uint8Array(buf).set(pcm, 44)
+  return new Uint8Array(buf)
+}
+
+export function createPlugin(
+  bridge: Bridge,
+  matrix: MatrixClient,
+  whisperUrl: string | null = null,
+  onUpdate?: () => void
+) {
   let hierarchy: RoomHierarchy = { dms: [], spaces: [], orphans: [] }
   let displayedRooms: DisplayItem[] = []
   let selectedRoomId: string | null = null
   let lines: string[] = []
   let view: 'rooms' | 'messages' | 'listening' = 'rooms'
   let recognizing = false
-  let ws: WebSocket | null = null
-  let wsConnected = false
+  let matrixConnected = false
+  let syncToken: string | null = null
   let errors: string[] = []
 
-  let audioStarted = false
+  let audioBuf: Uint8Array[] = []
   let seenEventIds: Set<string> = new Set()
   let scrollOffset = 0
   let listeningStartedAt = 0
@@ -174,79 +215,50 @@ export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => voi
     }
   }
 
-  function send(msg: object) {
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
+  async function onSyncMessage(roomId: string, eventId: string, sender: string, text: string) {
+    if (eventId && seenEventIds.has(eventId)) return
+    if (eventId) seenEventIds.add(eventId)
+    if (roomId === selectedRoomId) await appendLine(`${sender}: ${text}`)
   }
 
-  function sendBinary(data: Uint8Array) {
-    if (ws?.readyState === WebSocket.OPEN) ws.send(data)
+  async function start(token: string | null) {
+    log('info', 'start', { token })
+    matrixConnected = true
+    syncToken = token
+    onUpdate?.()
+    try {
+      hierarchy = await matrix.listRoomsHierarchical()
+      await showRoomList()
+      matrix.startSyncLoop(token, onSyncMessage, (newToken) => {
+        syncToken = newToken
+        onUpdate?.()
+      })
+    } catch (err) {
+      log('error', 'start failed', err)
+      pushError('start failed', String(err))
+    }
   }
 
-  function connect() {
-    log('info', 'connecting', { wsUrl })
-    ws = new WebSocket(wsUrl)
-    ws.onopen = () => {
-      log('info', 'ws connected')
-      wsConnected = true
-      onUpdate?.()
-      send({ type: 'list_rooms' })
-    }
-    ws.onmessage = async (e) => {
-      let ev: any
-      try {
-        ev = JSON.parse(e.data)
-      } catch (err) {
-        log('error', 'ws message parse failed', { raw: e.data, err })
-        return
+  async function transcribeAndSend() {
+    try {
+      const pcm = mergeChunks(audioBuf)
+      const wav = pcmToWav(pcm, 16000)
+      const form = new FormData()
+      form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav')
+      const res = await fetch(`${whisperUrl}/inference`, { method: 'POST', body: form })
+      if (!res.ok) throw new Error(`whisper: ${res.status}`)
+      const { text } = await res.json() as { text?: string }
+      if (text?.trim() && selectedRoomId) {
+        await matrix.sendMessage(selectedRoomId, text.trim())
       }
-      log('info', 'ws message', { type: ev.type })
-      if (ev.type === 'room_list') {
-        hierarchy = ev.hierarchy as RoomHierarchy
-        await showRoomList()
-      } else if (ev.type === 'history') {
-        seenEventIds = new Set(ev.messages.map((m: { event_id: string }) => m.event_id).filter(Boolean))
-        const histLines: string[] = ev.messages.map(
-          (m: { sender: string; text: string }) => `${m.sender}: ${m.text}`
-        )
-        if (view === 'messages') {
-          lines = histLines
-          if (scrollOffset === 0) {
-            try {
-              await bridge.textContainerUpgrade(new TextContainerUpgrade({
-                containerID: CONTAINER_ID,
-                content: buildContent(lines),
-              }))
-            } catch (err) {
-              log('error', 'textContainerUpgrade (history) failed', err)
-            }
-          }
-        } else {
-          await showMessageView(histLines)
-        }
-      } else if (ev.type === 'message') {
-        if (ev.event_id && seenEventIds.has(ev.event_id)) return
-        if (ev.event_id) seenEventIds.add(ev.event_id)
-        if (ev.room_id === selectedRoomId) {
-          await appendLine(`${ev.sender}: ${ev.text}`)
-        }
-      } else {
-        log('warn', 'unhandled ws message type', { type: ev.type })
-      }
-    }
-    ws.onerror = (e) => {
-      log('error', 'ws error', e)
-      pushError('ws error')
-    }
-    ws.onclose = (e) => {
-      log('warn', 'ws closed, reconnecting in 3s', { code: e.code, reason: e.reason })
-      wsConnected = false
-      onUpdate?.()
-      setTimeout(connect, 3000)
+    } catch (err) {
+      log('error', 'transcribeAndSend failed', err)
+      pushError('transcribeAndSend failed', String(err))
     }
   }
 
   async function stopAudio() {
-    log('info', 'stopAudio', { audioStarted })
+    log('info', 'stopAudio', { audioBufChunks: audioBuf.length })
     recognizing = false
     try {
       await bridge.audioControl(false)
@@ -254,10 +266,10 @@ export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => voi
       log('error', 'audioControl(false) failed', err)
       pushError('audioControl(false) failed', String(err))
     }
-    if (audioStarted) {
-      send({ type: 'audio_end' })
-      audioStarted = false
+    if (whisperUrl && audioBuf.length > 0 && selectedRoomId) {
+      await transcribeAndSend()
     }
+    audioBuf = []
     await showMessageView(lines)
   }
 
@@ -265,9 +277,8 @@ export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => voi
     log('info', 'startAudio')
     recognizing = true
     listeningStartedAt = Date.now()
+    audioBuf = []
     await showListeningView()
-    audioStarted = true
-    send({ type: 'audio_start' })
     try {
       await bridge.audioControl(true)
     } catch (err) {
@@ -281,7 +292,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => voi
     if (event.audioEvent && recognizing) {
       const pcm = event.audioEvent.audioPcm
       log('info', 'audioEvent', { type: typeof pcm, byteLength: pcm?.byteLength ?? pcm?.length })
-      sendBinary(pcm instanceof Uint8Array ? pcm : new Uint8Array(pcm))
+      audioBuf.push(pcm instanceof Uint8Array ? pcm : new Uint8Array(pcm))
     }
     if (event.listEvent) {
       const et = event.listEvent.eventType
@@ -293,7 +304,14 @@ export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => voi
         if (item && !item.isHeader) {
           log('info', 'room selected', { id: item.id, name: item.name })
           selectedRoomId = item.id
-          send({ type: 'select_room', room_id: item.id })
+          try {
+            const history = await matrix.fetchHistory(item.id, 50)
+            seenEventIds = new Set(history.map((m: MatrixMessage) => m.event_id).filter(Boolean))
+            await showMessageView(history.map((m: MatrixMessage) => `${m.sender}: ${m.text}`))
+          } catch (err) {
+            log('error', 'fetchHistory failed', err)
+            pushError('fetchHistory failed', String(err))
+          }
         } else if (item?.isHeader) {
           log('info', 'section header tapped — ignoring', { name: item.name })
         } else {
@@ -341,9 +359,19 @@ export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => voi
     }
   }
 
-  function getState() {
-    return { hierarchy, displayedRooms, selectedRoomId, lines, view, recognizing, scrollOffset, wsConnected, errors }
+  async function sendMessage(text: string) {
+    if (!selectedRoomId || !text.trim()) return
+    try {
+      await matrix.sendMessage(selectedRoomId, text.trim())
+    } catch (err) {
+      log('error', 'sendMessage failed', err)
+      pushError('sendMessage failed', String(err))
+    }
   }
 
-  return { connect, showRoomList, showMessageView, appendLine, send, startAudio, stopAudio, handleEvenHubEvent, getState }
+  function getState() {
+    return { hierarchy, displayedRooms, selectedRoomId, lines, view, recognizing, scrollOffset, matrixConnected, errors, syncToken }
+  }
+
+  return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage }
 }
