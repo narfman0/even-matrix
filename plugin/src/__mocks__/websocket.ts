@@ -5,7 +5,8 @@ export class FakeWebSocket {
   sentBinary: Uint8Array[] = []
   onopen: (() => void | Promise<void>) | null = null
   onmessage: ((e: MessageEvent) => void | Promise<void>) | null = null
-  onclose: (() => void | Promise<void>) | null = null
+  onclose: ((e: CloseEvent) => void | Promise<void>) | null = null
+  onerror: ((e: Event) => void | Promise<void>) | null = null
 
   send(data: string | ArrayBufferLike | ArrayBufferView) {
     if (typeof data === 'string') {
@@ -21,5 +22,7 @@ export class FakeWebSocket {
     await this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)
   }
 
-  async triggerClose(): Promise<void> { await this.onclose?.() }
+  async triggerClose(code = 1000, reason = ''): Promise<void> {
+    await this.onclose?.({ code, reason } as CloseEvent)
+  }
 }

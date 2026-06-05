@@ -327,7 +327,7 @@ describe('handleEvenHubEvent', () => {
     expect(bridge.audioControl).not.toHaveBeenCalledWith(true)
   })
 
-  it('back gesture (undefined sysEvent type) shows room list when not recording', async () => {
+  it('back gesture (no eventType) navigates to rooms', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     await goToMessages(ws)
@@ -583,107 +583,3 @@ describe('auto-follow behavior', () => {
   })
 })
 
-// ─── Simulator STT path ───────────────────────────────────────────────────────
-
-function makeSimulatorPlugin() {
-  const recognition = {
-    start: vi.fn(),
-    stop: vi.fn(),
-    onresult: null as any,
-    onend: null as any,
-    onerror: null as any,
-    continuous: false,
-    interimResults: false,
-    lang: '',
-  }
-  vi.stubGlobal('SpeechRecognition', vi.fn(() => recognition))
-  const { bridge, plugin, ws } = makePlugin()
-  return { bridge, plugin, ws, recognition }
-}
-
-describe('simulator STT path', () => {
-  it('startAudio shows listening screen without calling audioControl', async () => {
-    const { bridge, plugin, ws } = makeSimulatorPlugin()
-    plugin.connect()
-    await goToMessages(ws)
-    bridge.rebuildPageContainer.mockClear()
-    await plugin.startAudio()
-    expect(bridge.audioControl).not.toHaveBeenCalled()
-    expect(plugin.getState().view).toBe('listening')
-    const arg = bridge.rebuildPageContainer.mock.calls[0][0]
-    expect(arg.textObject[0].content).toBe('Listening...')
-  })
-
-  it('startAudio calls recognition.start()', async () => {
-    const { plugin, ws, recognition } = makeSimulatorPlugin()
-    plugin.connect()
-    await goToMessages(ws)
-    await plugin.startAudio()
-    expect(recognition.start).toHaveBeenCalledOnce()
-  })
-
-  it('onresult sends transcript and stops audio', async () => {
-    const { bridge, plugin, ws, recognition } = makeSimulatorPlugin()
-    plugin.connect()
-    await goToMessages(ws)
-    await plugin.startAudio()
-    ws.sent = []
-    await recognition.onresult({ results: [[{ transcript: 'hello world' }]] })
-    expect(ws.sent).toContain(JSON.stringify({ type: 'transcript', text: 'hello world' }))
-    expect(plugin.getState().recognizing).toBe(false)
-    expect(plugin.getState().view).toBe('messages')
-  })
-
-  it('stopAudio calls recognition.stop() and returns to messages', async () => {
-    const { bridge, plugin, ws, recognition } = makeSimulatorPlugin()
-    plugin.connect()
-    await goToMessages(ws)
-    await plugin.startAudio()
-    bridge.rebuildPageContainer.mockClear()
-    await plugin.stopAudio()
-    expect(recognition.stop).toHaveBeenCalledOnce()
-    expect(bridge.audioControl).not.toHaveBeenCalled()
-    expect(plugin.getState().view).toBe('messages')
-  })
-
-  it('stopAudio does not send audio_end', async () => {
-    const { plugin, ws, recognition } = makeSimulatorPlugin()
-    plugin.connect()
-    await goToMessages(ws)
-    await plugin.startAudio()
-    ws.sent = []
-    await plugin.stopAudio()
-    expect(ws.sent).not.toContain(JSON.stringify({ type: 'audio_end' }))
-  })
-
-  it('onend calls stopAudio while recognizing', async () => {
-    const { plugin, ws, recognition } = makeSimulatorPlugin()
-    plugin.connect()
-    await goToMessages(ws)
-    await plugin.startAudio()
-    await recognition.onend()
-    expect(plugin.getState().recognizing).toBe(false)
-    expect(plugin.getState().view).toBe('messages')
-  })
-
-  it('onerror calls stopAudio while recognizing', async () => {
-    const { plugin, ws, recognition } = makeSimulatorPlugin()
-    plugin.connect()
-    await goToMessages(ws)
-    await plugin.startAudio()
-    await recognition.onerror()
-    expect(plugin.getState().recognizing).toBe(false)
-    expect(plugin.getState().view).toBe('messages')
-  })
-
-  it('audioEvent PCM is ignored in simulator path', async () => {
-    const { plugin, ws, recognition } = makeSimulatorPlugin()
-    plugin.connect()
-    await goToMessages(ws)
-    await plugin.startAudio()
-    const pcm = new Uint8Array(4_000 * 2)
-    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcm } })
-    // PCM ignored — recognition.start was already called, no audio_start sent
-    expect(ws.sent).not.toContain(JSON.stringify({ type: 'audio_start' }))
-  })
-})

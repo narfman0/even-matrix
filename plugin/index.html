@@ -4,8 +4,76 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Even Matrix</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: monospace; background: #111; color: #eee; font-size: 14px; }
+      #status-bar {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 6px 12px; background: #222; border-bottom: 1px solid #333;
+        position: sticky; top: 0; z-index: 10;
+      }
+      #ws-status { font-size: 12px; }
+      #ws-status.connected { color: #4caf50; }
+      #ws-status.disconnected { color: #f44336; }
+      #view-label { font-size: 12px; color: #888; }
+      #content { padding: 8px 12px; min-height: 200px; }
+      .room-item {
+        padding: 6px 8px; border-radius: 4px; cursor: pointer;
+        border: 1px solid #333; margin-bottom: 4px;
+      }
+      .room-item.selected { border-color: #4caf50; background: #1a2e1a; }
+      .room-item:hover { background: #1e1e1e; }
+      .messages { white-space: pre-wrap; line-height: 1.5; }
+      .listening-indicator {
+        display: flex; align-items: center; gap: 8px;
+        padding: 16px; color: #4caf50; font-size: 16px;
+      }
+      .pulse {
+        width: 12px; height: 12px; border-radius: 50%; background: #4caf50;
+        animation: pulse 1s infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+      }
+      #error-log {
+        margin-top: 12px; border-top: 1px solid #333; padding: 8px 12px;
+      }
+      #error-log h3 { font-size: 11px; color: #888; margin-bottom: 6px; }
+      .error-entry {
+        font-size: 11px; color: #f44336; padding: 2px 0;
+        border-bottom: 1px solid #222; word-break: break-all;
+      }
+      #no-errors { font-size: 11px; color: #555; }
+      #controls {
+        display: none; justify-content: space-between; align-items: center;
+        padding: 6px 12px; background: #1a1a1a; border-bottom: 1px solid #333;
+        gap: 8px;
+      }
+      #controls.visible { display: flex; }
+      .ctrl-btn {
+        padding: 6px 14px; border-radius: 4px; border: 1px solid #444;
+        background: #2a2a2a; color: #eee; font-family: monospace; font-size: 13px;
+        cursor: pointer;
+      }
+      .ctrl-btn:active { background: #3a3a3a; }
+      .ctrl-btn.primary { border-color: #4caf50; color: #4caf50; }
+      .ctrl-btn.danger  { border-color: #f44336; color: #f44336; }
+    </style>
   </head>
   <body>
+    <div id="status-bar">
+      <span id="ws-status" class="disconnected">WS: disconnected</span>
+      <span id="view-label">–</span>
+    </div>
+    <div id="controls">
+      <button id="ctrl-back" class="ctrl-btn">Back</button>
+      <button id="ctrl-action" class="ctrl-btn primary">Talk</button>
+    </div>
+    <div id="content"></div>
+    <div id="error-log">
+      <h3>ERRORS</h3>
+      <div id="no-errors">none</div>
+    </div>
     <script type="module" src="/src/index.ts"></script>
   </body>
 </html>
