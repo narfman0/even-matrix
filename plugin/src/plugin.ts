@@ -381,6 +381,11 @@ export function createPlugin(
     }
   }
 
+  async function navigateToRoom(roomId: string) {
+    const index = displayedRooms.findIndex(r => r.id === roomId && !r.isHeader)
+    if (index !== -1) await handleEvenHubEvent({ listEvent: { currentSelectItemIndex: index } })
+  }
+
   async function sendMessage(text: string) {
     if (!selectedRoomId || !text.trim()) return
     try {
@@ -395,5 +400,5 @@ export function createPlugin(
     return { hierarchy, displayedRooms, selectedRoomId, lines, view, recognizing, scrollOffset, matrixConnected, errors, syncToken }
   }
 
-  return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage }
+  return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage, navigateToRoom }
 }

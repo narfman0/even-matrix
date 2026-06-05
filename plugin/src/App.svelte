@@ -106,6 +106,21 @@
     }
   }
 
+  async function testWhisper() {
+    const url = whisperValue.trim()
+    if (!url) { saveStatus = 'Enter a Whisper URL first.'; saveColor = '#f44336'; return }
+    saveStatus = 'Testing...'
+    saveColor = '#888'
+    try {
+      const res = await fetch(`${url}/`, { signal: AbortSignal.timeout(5000) })
+      saveStatus = `Reachable (HTTP ${res.status}) ✓`
+      saveColor = '#4caf50'
+    } catch (e) {
+      saveStatus = `Unreachable: ${e}`
+      saveColor = '#f44336'
+    }
+  }
+
   onMount(async () => {
     bridge = await waitForEvenAppBridge()
 
@@ -121,12 +136,13 @@
       })
     )
 
-    const homeserver  = await bridge.getLocalStorage('even_matrix_homeserver').catch(() => '')
-    const accessToken = await bridge.getLocalStorage('even_matrix_access_token').catch(() => '')
-    const userId      = await bridge.getLocalStorage('even_matrix_user_id').catch(() => '')
-    const syncToken   = await bridge.getLocalStorage('even_matrix_sync_token').catch(() => null)
-    const whisperUrl  = await bridge.getLocalStorage('even_matrix_whisper_url').catch(() => null)
-    const savedUser   = await bridge.getLocalStorage('even_matrix_username').catch(() => '')
+    const homeserver    = await bridge.getLocalStorage('even_matrix_homeserver').catch(() => '')
+    const accessToken   = await bridge.getLocalStorage('even_matrix_access_token').catch(() => '')
+    const userId        = await bridge.getLocalStorage('even_matrix_user_id').catch(() => '')
+    const syncToken     = await bridge.getLocalStorage('even_matrix_sync_token').catch(() => null)
+    const whisperUrl    = await bridge.getLocalStorage('even_matrix_whisper_url').catch(() => null)
+    const savedUser     = await bridge.getLocalStorage('even_matrix_username').catch(() => '')
+    const savedRoomId   = await bridge.getLocalStorage('even_matrix_selected_room').catch(() => null)
 
     hsValue = homeserver
     userValue = savedUser
@@ -140,11 +156,13 @@
     const matrix = new MatrixRestClient(homeserver, accessToken, userId)
     plugin = createPlugin(bridge, matrix, whisperUrl || null, () => {
       state = plugin!.getState()
-      const { syncToken: tok } = plugin!.getState()
-      if (tok) bridge.setLocalStorage('even_matrix_sync_token', tok)
+      const s = plugin!.getState()
+      if (s.syncToken) bridge.setLocalStorage('even_matrix_sync_token', s.syncToken)
+      if (s.selectedRoomId) bridge.setLocalStorage('even_matrix_selected_room', s.selectedRoomId)
     })
     bridge.onEvenHubEvent(plugin.handleEvenHubEvent)
     await plugin.start(syncToken)
+    if (savedRoomId) await plugin.navigateToRoom(savedRoomId)
   })
 </script>
 
@@ -196,6 +214,7 @@
     <div class="settings-row">
       <label class="settings-label" for="whisper-input">Whisper URL</label>
       <input id="whisper-input" type="text" placeholder="http://whisper-server:8080 (optional)" bind:value={whisperValue} />
+      <button class="save-btn" onclick={testWhisper}>Test</button>
       <button class="save-btn" onclick={saveWhisper}>Save</button>
     </div>
     <div id="save-status" style="color: {saveColor}">{saveStatus}</div>
