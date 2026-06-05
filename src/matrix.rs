@@ -1,19 +1,25 @@
+use crate::api::{RoomHierarchy, RoomInfo, SpaceInfo};
 use crate::config::Config;
 use crate::session::CachedMessage;
 use anyhow::Result;
 use matrix_sdk::{
     Client,
     config::SyncSettings,
+    deserialized_responses::SyncOrStrippedState,
     room::MessagesOptions,
     ruma::{
         OwnedRoomId,
         events::{
             AnySyncMessageLikeEvent, AnySyncTimelineEvent,
             room::message::{MessageType, RoomMessageEventContent},
+            space::child::SpaceChildEventContent,
+            SyncStateEvent,
         },
+        room::RoomType,
         UInt,
     },
 };
+use std::collections::{HashMap, HashSet};
 use tracing::info;
 
 pub struct MatrixClient {
@@ -48,26 +54,79 @@ impl MatrixClient {
         Ok(Self { client, hs_host })
     }
 
-    /// Returns all joined rooms as (room_id, display_name) pairs.
-    pub fn list_rooms(&self) -> Vec<(String, String)> {
-        self.client
-            .joined_rooms()
-            .into_iter()
-            .map(|room| {
-                let id = room.room_id().to_string();
-                let name = room.name().unwrap_or_else(|| id.clone());
-                (id, name)
-            })
-            .collect()
-    }
+    /// Returns all joined rooms grouped into DMs, space children, and orphans.
+    pub async fn list_rooms_hierarchical(&self) -> RoomHierarchy {
+        let all_rooms = self.client.joined_rooms();
 
-    /// Returns the first joined room's ID as the default for voice sends.
-    pub fn default_room_id(&self) -> Option<String> {
-        self.client
-            .joined_rooms()
-            .into_iter()
-            .next()
-            .map(|r| r.room_id().to_string())
+        // Pass 1: split spaces from candidate non-space rooms
+        let mut space_rooms: Vec<matrix_sdk::Room> = Vec::new();
+        let mut candidates: HashMap<String, (matrix_sdk::Room, String)> = HashMap::new();
+
+        for room in all_rooms {
+            let id = room.room_id().to_string();
+            let name = room.name().unwrap_or_else(|| id.clone());
+            if room.room_type() == Some(RoomType::Space) {
+                space_rooms.push(room);
+            } else {
+                candidates.insert(id, (room, name));
+            }
+        }
+
+        // Pass 2: for each space, collect its joined child rooms
+        let mut claimed: HashSet<String> = HashSet::new();
+        let mut spaces: Vec<SpaceInfo> = Vec::new();
+
+        for space in &space_rooms {
+            let space_id = space.room_id().to_string();
+            let space_name = space.name().unwrap_or_else(|| space_id.clone());
+
+            let child_events = space
+                .get_state_events_static::<SpaceChildEventContent>()
+                .await
+                .unwrap_or_default();
+
+            let mut child_rooms: Vec<RoomInfo> = child_events
+                .iter()
+                .filter_map(|raw| raw.deserialize().ok())
+                .filter_map(|ev| match ev {
+                    SyncOrStrippedState::Sync(SyncStateEvent::Original(e))
+                        if !e.content.via.is_empty() =>
+                    {
+                        Some(e.state_key.to_string())
+                    }
+                    SyncOrStrippedState::Stripped(e) => Some(e.state_key.to_string()),
+                    _ => None,
+                })
+                .filter_map(|child_id: String| {
+                    candidates.get(&child_id).map(|(_, name)| {
+                        claimed.insert(child_id.clone());
+                        RoomInfo { id: child_id, name: name.clone() }
+                    })
+                })
+                .collect();
+
+            child_rooms.sort_by(|a, b| a.name.cmp(&b.name));
+            spaces.push(SpaceInfo { id: space_id, name: space_name, rooms: child_rooms });
+        }
+        spaces.sort_by(|a, b| a.name.cmp(&b.name));
+
+        // Pass 3: classify unclaimed rooms as DMs or orphans
+        let mut dms: Vec<RoomInfo> = Vec::new();
+        let mut orphans: Vec<RoomInfo> = Vec::new();
+
+        for (id, (room, name)) in &candidates {
+            if claimed.contains(id) { continue; }
+            let info = RoomInfo { id: id.clone(), name: name.clone() };
+            if room.is_direct().await.unwrap_or(false) {
+                dms.push(info);
+            } else {
+                orphans.push(info);
+            }
+        }
+        dms.sort_by(|a, b| a.name.cmp(&b.name));
+        orphans.sort_by(|a, b| a.name.cmp(&b.name));
+
+        RoomHierarchy { dms, spaces, orphans }
     }
 
     /// Send a message to a room by its ID.

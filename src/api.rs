@@ -38,6 +38,20 @@ pub struct RoomInfo {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct SpaceInfo {
+    pub id: String,
+    pub name: String,
+    pub rooms: Vec<RoomInfo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RoomHierarchy {
+    pub dms: Vec<RoomInfo>,
+    pub spaces: Vec<SpaceInfo>,
+    pub orphans: Vec<RoomInfo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct HistMsg {
     pub event_id: String,
     pub sender: String,
@@ -60,7 +74,7 @@ pub enum ServerEvent {
         text: String,
     },
     RoomList {
-        rooms: Vec<RoomInfo>,
+        hierarchy: RoomHierarchy,
     },
     History {
         room_id: String,
@@ -159,12 +173,8 @@ async fn handle_socket(
                         state.lock().await.last_transcript = Some(transcript);
                     }
                     Ok(ClientMsg::ListRooms) => {
-                        let rooms = matrix
-                            .list_rooms()
-                            .into_iter()
-                            .map(|(id, name)| RoomInfo { id, name })
-                            .collect();
-                        let _ = tx.send(ServerEvent::RoomList { rooms });
+                        let hierarchy = matrix.list_rooms_hierarchical().await;
+                        let _ = tx.send(ServerEvent::RoomList { hierarchy });
                     }
                     Ok(ClientMsg::SelectRoom { room_id }) => {
                         state.lock().await.selected_room = Some(room_id.clone());

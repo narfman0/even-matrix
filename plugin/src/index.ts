@@ -49,13 +49,17 @@ function renderState(plugin: ReturnType<typeof createPlugin>) {
       if (state.displayedRooms.length === 0) {
         contentEl.innerHTML = '<div style="color:#555;padding:8px">No rooms</div>'
       } else {
-        state.displayedRooms.forEach((r, index) => {
+        state.displayedRooms.forEach((item, index) => {
           const div = document.createElement('div')
-          div.className = 'room-item' + (r.id === state.selectedRoomId ? ' selected' : '')
-          div.textContent = r.name
-          div.addEventListener('click', () => {
-            plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: index } })
-          })
+          if (item.isHeader) {
+            div.className = 'section-header'
+          } else {
+            div.className = 'room-item' + (item.id === state.selectedRoomId ? ' selected' : '')
+            div.addEventListener('click', () => {
+              plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: index } })
+            })
+          }
+          div.textContent = item.name
           contentEl.appendChild(div)
         })
       }

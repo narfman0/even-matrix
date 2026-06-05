@@ -33,7 +33,7 @@ function makePlugin() {
 }
 
 async function seedRooms(ws: FakeWebSocket, rooms: Array<{ id: string; name: string }>) {
-  await ws.triggerMessage({ type: 'room_list', rooms })
+  await ws.triggerMessage({ type: 'room_list', hierarchy: { dms: [], spaces: [], orphans: rooms } })
 }
 
 async function goToMessages(ws: FakeWebSocket, messages: Array<{ sender: string; text: string }> = []) {
@@ -43,21 +43,21 @@ async function goToMessages(ws: FakeWebSocket, messages: Array<{ sender: string;
 // ─── showRoomList ─────────────────────────────────────────────────────────────
 
 describe('showRoomList', () => {
-  it('sorts rooms alphabetically', async () => {
+  it('renders rooms in the order received (backend sorts)', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
-    await seedRooms(ws, [{ id: 'b', name: 'Beta' }, { id: 'a', name: 'Alpha' }])
+    await seedRooms(ws, [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Beta' }])
     const arg = bridge.rebuildPageContainer.mock.calls[0][0]
     expect(arg.listObject[0].itemContainer.itemName).toEqual(['Alpha', 'Beta'])
   })
 
-  it('caps list at 20 rooms', async () => {
+  it('shows all rooms without capping', async () => {
     const { bridge, plugin, ws } = makePlugin()
     plugin.connect()
     const rooms = Array.from({ length: 25 }, (_, i) => ({ id: `r${i}`, name: `Room ${i}` }))
     await seedRooms(ws, rooms)
     const arg = bridge.rebuildPageContainer.mock.calls[0][0]
-    expect(arg.listObject[0].itemContainer.itemName).toHaveLength(20)
+    expect(arg.listObject[0].itemContainer.itemName).toHaveLength(25)
   })
 
   it('truncates room names to 64 chars', async () => {
@@ -515,6 +515,89 @@ describe('stopAudio', () => {
     expect(bridge.rebuildPageContainer).toHaveBeenCalledOnce()
     expect(plugin.getState().view).toBe('messages')
     expect(plugin.getState().scrollOffset).toBe(0)
+  })
+})
+
+// ─── Room hierarchy ───────────────────────────────────────────────────────────
+
+describe('room hierarchy', () => {
+  it('DMs section adds header at index 0 followed by DM rooms', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await ws.triggerMessage({
+      type: 'room_list',
+      hierarchy: { dms: [{ id: 'dm-1', name: 'Alice' }], spaces: [], orphans: [] },
+    })
+    const names = bridge.rebuildPageContainer.mock.calls[0][0].listObject[0].itemContainer.itemName
+    expect(names[0]).toBe('── DMs ──')
+    expect(names[1]).toBe('Alice')
+  })
+
+  it('space section adds space header and child rooms', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await ws.triggerMessage({
+      type: 'room_list',
+      hierarchy: {
+        dms: [],
+        spaces: [{ id: 'sp-1', name: 'ACME', rooms: [{ id: 'r-1', name: 'general' }] }],
+        orphans: [],
+      },
+    })
+    const names = bridge.rebuildPageContainer.mock.calls[0][0].listObject[0].itemContainer.itemName
+    expect(names[0]).toBe('── ACME ──')
+    expect(names[1]).toBe('general')
+  })
+
+  it('orphans show without Other header when no DMs or spaces', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await seedRooms(ws, [{ id: 'r-1', name: 'Room' }])
+    const names = bridge.rebuildPageContainer.mock.calls[0][0].listObject[0].itemContainer.itemName
+    expect(names).toEqual(['Room'])
+  })
+
+  it('orphans get Other header when DMs are also present', async () => {
+    const { bridge, plugin, ws } = makePlugin()
+    plugin.connect()
+    await ws.triggerMessage({
+      type: 'room_list',
+      hierarchy: {
+        dms: [{ id: 'dm-1', name: 'Alice' }],
+        spaces: [],
+        orphans: [{ id: 'r-1', name: 'general' }],
+      },
+    })
+    const names = bridge.rebuildPageContainer.mock.calls[0][0].listObject[0].itemContainer.itemName
+    expect(names).toEqual(['── DMs ──', 'Alice', '── Other ──', 'general'])
+  })
+
+  it('clicking a section header does not select a room', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await ws.triggerMessage({
+      type: 'room_list',
+      hierarchy: { dms: [{ id: 'dm-1', name: 'Alice' }], spaces: [], orphans: [] },
+    })
+    ws.sent = []
+    // index 0 is the '── DMs ──' header
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    expect(plugin.getState().selectedRoomId).toBeNull()
+    expect(ws.sent).toHaveLength(0)
+  })
+
+  it('clicking a room after a header selects the correct room', async () => {
+    const { plugin, ws } = makePlugin()
+    plugin.connect()
+    await ws.triggerMessage({
+      type: 'room_list',
+      hierarchy: { dms: [{ id: 'dm-1', name: 'Alice' }], spaces: [], orphans: [] },
+    })
+    ws.sent = []
+    // index 1 is 'Alice' (after the DMs header at index 0)
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 1 } })
+    expect(plugin.getState().selectedRoomId).toBe('dm-1')
+    expect(ws.sent).toContain(JSON.stringify({ type: 'select_room', room_id: 'dm-1' }))
   })
 })
 

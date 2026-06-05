@@ -19,6 +19,29 @@ const DISPLAY_MAX_LINES = 20
 const DISPLAY_MAX_BYTES = 990
 const SCROLL_STEP = 3
 
+interface RoomInfo { id: string; name: string }
+interface SpaceInfo { id: string; name: string; rooms: RoomInfo[] }
+interface RoomHierarchy { dms: RoomInfo[]; spaces: SpaceInfo[]; orphans: RoomInfo[] }
+type DisplayItem = RoomInfo & { isHeader: boolean }
+
+function buildDisplayedRooms(h: RoomHierarchy): DisplayItem[] {
+  const result: DisplayItem[] = []
+  const hasSections = h.dms.length > 0 || h.spaces.length > 0
+  if (h.dms.length > 0) {
+    result.push({ id: '', name: '── DMs ──', isHeader: true })
+    h.dms.forEach(r => result.push({ ...r, isHeader: false }))
+  }
+  h.spaces.forEach(space => {
+    result.push({ id: space.id, name: `── ${space.name} ──`, isHeader: true })
+    space.rooms.forEach(r => result.push({ ...r, isHeader: false }))
+  })
+  if (h.orphans.length > 0) {
+    if (hasSections) result.push({ id: '', name: '── Other ──', isHeader: true })
+    h.orphans.forEach(r => result.push({ ...r, isHeader: false }))
+  }
+  return result
+}
+
 const MAX_ERRORS = 50
 
 function log(level: 'info' | 'warn' | 'error', msg: string, data?: any) {
@@ -41,8 +64,8 @@ function buildContent(lines: string[], offset = 0): string {
 
 
 export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => void) {
-  let rooms: Array<{ id: string; name: string }> = []
-  let displayedRooms: Array<{ id: string; name: string }> = []
+  let hierarchy: RoomHierarchy = { dms: [], spaces: [], orphans: [] }
+  let displayedRooms: DisplayItem[] = []
   let selectedRoomId: string | null = null
   let lines: string[] = []
   let view: 'rooms' | 'messages' | 'listening' = 'rooms'
@@ -65,10 +88,10 @@ export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => voi
   }
 
   async function showRoomList() {
-    log('info', 'showRoomList', { roomCount: rooms.length })
+    log('info', 'showRoomList', { dms: hierarchy.dms.length, spaces: hierarchy.spaces.length, orphans: hierarchy.orphans.length })
     view = 'rooms'
-    displayedRooms = [...rooms].sort((a, b) => a.name.localeCompare(b.name))
-    const names = displayedRooms.slice(0, 20).map(r => r.name.slice(0, 64))
+    displayedRooms = buildDisplayedRooms(hierarchy)
+    const names = displayedRooms.map(r => r.name.slice(0, 64))
     onUpdate?.()
     try {
       await bridge.rebuildPageContainer(new RebuildPageContainer({
@@ -178,7 +201,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => voi
       }
       log('info', 'ws message', { type: ev.type })
       if (ev.type === 'room_list') {
-        rooms = ev.rooms
+        hierarchy = ev.hierarchy as RoomHierarchy
         await showRoomList()
       } else if (ev.type === 'history') {
         seenEventIds = new Set(ev.messages.map((m: { event_id: string }) => m.event_id).filter(Boolean))
@@ -266,11 +289,13 @@ export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => voi
       log('info', 'listEvent', { eventType: et, isScroll, currentSelectItemIndex: event.listEvent.currentSelectItemIndex })
       if (!isScroll) {
         const index = event.listEvent.currentSelectItemIndex ?? 0
-        const room = displayedRooms[index]
-        if (room) {
-          log('info', 'room selected', { id: room.id, name: room.name })
-          selectedRoomId = room.id
-          send({ type: 'select_room', room_id: room.id })
+        const item = displayedRooms[index]
+        if (item && !item.isHeader) {
+          log('info', 'room selected', { id: item.id, name: item.name })
+          selectedRoomId = item.id
+          send({ type: 'select_room', room_id: item.id })
+        } else if (item?.isHeader) {
+          log('info', 'section header tapped — ignoring', { name: item.name })
         } else {
           log('warn', 'listEvent index out of range', { index, displayedRoomsLength: displayedRooms.length })
         }
@@ -317,7 +342,7 @@ export function createPlugin(bridge: Bridge, wsUrl: string, onUpdate?: () => voi
   }
 
   function getState() {
-    return { rooms, displayedRooms, selectedRoomId, lines, view, recognizing, scrollOffset, wsConnected, errors }
+    return { hierarchy, displayedRooms, selectedRoomId, lines, view, recognizing, scrollOffset, wsConnected, errors }
   }
 
   return { connect, showRoomList, showMessageView, appendLine, send, startAudio, stopAudio, handleEvenHubEvent, getState }

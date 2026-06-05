@@ -80,7 +80,6 @@ async fn main() -> Result<()> {
         let state2 = Arc::clone(&state);
         let tx2 = tx.clone();
         let matrix2 = Arc::clone(&matrix);
-        let default_room = matrix2.default_room_id().unwrap_or_default();
 
         tokio::spawn(async move {
             loop {
@@ -92,12 +91,9 @@ async fn main() -> Result<()> {
                 };
 
                 if let Some(text) = pending {
-                    let room_id = state2
-                        .lock()
-                        .await
-                        .selected_room
-                        .clone()
-                        .unwrap_or_else(|| default_room.clone());
+                    let Some(room_id) = state2.lock().await.selected_room.clone() else {
+                        continue;
+                    };
 
                     match matrix2.send_to_room_id(&room_id, &text).await {
                         Ok(_) => {
