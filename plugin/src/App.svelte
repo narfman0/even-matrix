@@ -36,6 +36,7 @@
   let saveColor = $state('#888')
   let msgInput = $state('')
 
+  let loadingRoomId = $state<string | null>(null)
   let plugin: Plugin | null = null
   let bridge: any = null
 
@@ -44,6 +45,23 @@
     return lines
       .slice(Math.max(0, lines.length - 20 - scrollOffset), lines.length - scrollOffset)
       .reverse()
+  }
+
+  const SENDER_COLORS = [
+    '#7eb8f7', '#f7c67e', '#b8f77e', '#f77eb8',
+    '#7ef7e8', '#c67ef7', '#f7f07e', '#f7907e',
+  ]
+
+  function senderColor(sender: string): string {
+    let hash = 0
+    for (let i = 0; i < sender.length; i++) hash = (hash * 31 + sender.charCodeAt(i)) >>> 0
+    return SENDER_COLORS[hash % SENDER_COLORS.length]
+  }
+
+  function parseLine(line: string): { sender: string; text: string } | null {
+    const colon = line.indexOf(': ')
+    if (colon === -1) return null
+    return { sender: line.slice(0, colon), text: line.slice(colon + 2) }
   }
 
   async function saveCredentials() {
@@ -62,6 +80,12 @@
       saveStatus = `Login failed: ${e}`
       saveColor = '#f44336'
     }
+  }
+
+  async function selectRoom(index: number, id: string) {
+    loadingRoomId = id
+    await plugin?.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: index } })
+    loadingRoomId = null
   }
 
   async function sendText() {
@@ -199,8 +223,13 @@
             <div
               class="room-item"
               class:selected={item.id === state.selectedRoomId}
-              onclick={() => plugin?.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: index } })}
-            >{item.name}</div>
+              onclick={() => selectRoom(index, item.id)}
+            >
+              {item.name}
+              {#if loadingRoomId === item.id}
+                <span class="room-spinner">↻</span>
+              {/if}
+            </div>
           {/if}
         {/each}
       {/if}
@@ -209,7 +238,23 @@
         <div class="pulse"></div>Listening...
       </div>
     {:else}
-      <div class="messages">{visibleLines().join('\n') || '(no messages)'}</div>
+      <div class="messages">
+        {#if visibleLines().length === 0}
+          <span class="no-msg">(no messages)</span>
+        {:else}
+          {#each visibleLines() as line}
+            {@const parsed = parseLine(line)}
+            <div class="msg-line">
+              {#if parsed}
+                <span class="msg-sender" style="color: {senderColor(parsed.sender)}">{parsed.sender}:</span>
+                <span class="msg-text"> {parsed.text}</span>
+              {:else}
+                {line}
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      </div>
     {/if}
   </div>
 {/if}
@@ -245,7 +290,16 @@
     border-bottom: 1px solid #333; margin-top: 8px; cursor: default;
   }
   .no-rooms { color: #555; padding: 8px; }
-  .messages { white-space: pre-wrap; line-height: 1.5; }
+  .room-spinner {
+    display: inline-block; margin-left: 6px; font-size: 13px; color: #888;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .messages { white-space: pre-wrap; }
+  .msg-line { line-height: 1.5; }
+  .msg-sender { font-weight: bold; }
+  .msg-text { color: #ccc; }
+  .no-msg { color: #555; }
   .listening-indicator {
     display: flex; align-items: center; gap: 8px;
     padding: 16px; color: #4caf50; font-size: 16px;
