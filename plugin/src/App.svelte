@@ -6,11 +6,12 @@
     CreateStartUpPageContainer,
   } from '@evenrealities/even_hub_sdk'
   import { createPlugin } from './plugin'
+  import appJson from '../app.json'
 
   const CONTAINER_ID = 1
   const DEFAULT_HOST = 'srv:4000'
   const STORAGE_KEY_HOST = 'even_matrix_host'
-  const APP_VERSION = '0.1.2'
+  const APP_VERSION: string = appJson.version
 
   type Plugin = ReturnType<typeof createPlugin>
   type PluginState = ReturnType<Plugin['getState']>
