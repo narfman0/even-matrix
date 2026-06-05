@@ -8,6 +8,9 @@ import { createPlugin } from './plugin'
 const CONTAINER_ID = 1
 const DEFAULT_HOST = 'srv:4000'
 const STORAGE_KEY_HOST = 'even_matrix_host'
+const APP_VERSION = '0.1.2'
+
+let settingsOpen = false
 
 function renderState(plugin: ReturnType<typeof createPlugin>) {
   const state = plugin.getState()
@@ -19,13 +22,13 @@ function renderState(plugin: ReturnType<typeof createPlugin>) {
   }
 
   const viewEl = document.getElementById('view-label')
-  if (viewEl) viewEl.textContent = state.view
+  if (viewEl) viewEl.textContent = settingsOpen ? 'settings' : state.view
 
   const controls = document.getElementById('controls')
   const backBtn = document.getElementById('ctrl-back') as HTMLButtonElement | null
   const actionBtn = document.getElementById('ctrl-action') as HTMLButtonElement | null
   if (controls && backBtn && actionBtn) {
-    if (state.view === 'rooms') {
+    if (settingsOpen || state.view === 'rooms') {
       controls.classList.remove('visible')
     } else if (state.view === 'messages') {
       controls.classList.add('visible')
@@ -43,7 +46,11 @@ function renderState(plugin: ReturnType<typeof createPlugin>) {
   }
 
   const contentEl = document.getElementById('content')
-  if (contentEl) {
+  const settingsPanel = document.getElementById('settings-panel')
+  if (contentEl) contentEl.style.display = settingsOpen ? 'none' : ''
+  if (settingsPanel) settingsPanel.style.display = settingsOpen ? 'block' : 'none'
+
+  if (!settingsOpen && contentEl) {
     if (state.view === 'rooms') {
       contentEl.innerHTML = ''
       if (state.displayedRooms.length === 0) {
@@ -117,6 +124,34 @@ async function main() {
   const plugin = createPlugin(bridge, `ws://${host}/ws`, () => renderState(plugin))
   bridge.onEvenHubEvent(plugin.handleEvenHubEvent)
   plugin.connect()
+
+  const versionEl = document.getElementById('app-version')
+  if (versionEl) versionEl.textContent = `v${APP_VERSION}`
+
+  const hostInput = document.getElementById('host-input') as HTMLInputElement | null
+  if (hostInput) hostInput.value = host
+
+  document.getElementById('settings-btn')?.addEventListener('click', () => {
+    settingsOpen = !settingsOpen
+    const btn = document.getElementById('settings-btn')
+    if (btn) btn.textContent = settingsOpen ? '✕' : '⚙'
+    renderState(plugin)
+  })
+
+  document.getElementById('save-host-btn')?.addEventListener('click', async () => {
+    const input = document.getElementById('host-input') as HTMLInputElement | null
+    const status = document.getElementById('save-status')
+    if (!input || !status) return
+    const newHost = input.value.trim()
+    try {
+      await bridge.setLocalStorage(STORAGE_KEY_HOST, newHost)
+      status.textContent = 'Saved. Reload to apply.'
+      status.style.color = '#4caf50'
+    } catch {
+      status.textContent = 'Save failed.'
+      status.style.color = '#f44336'
+    }
+  })
 
   document.getElementById('ctrl-back')?.addEventListener('click', () => {
     plugin.handleEvenHubEvent({ sysEvent: {} })

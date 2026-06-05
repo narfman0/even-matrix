@@ -2,7 +2,7 @@
   "package_id": "com.blastedstudios.evenmatrix",
   "edition": "202601",
   "name": "even-matrix",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Matrix messaging from your even glasses",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.10",

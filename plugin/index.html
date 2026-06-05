@@ -16,6 +16,11 @@
       #ws-status.connected { color: #4caf50; }
       #ws-status.disconnected { color: #f44336; }
       #view-label { font-size: 12px; color: #888; }
+      #settings-btn {
+        background: none; border: none; color: #888; font-size: 16px;
+        cursor: pointer; padding: 0 4px; line-height: 1;
+      }
+      #settings-btn:hover { color: #eee; }
       #content { padding: 8px 12px; min-height: 200px; }
       .room-item {
         padding: 6px 8px; border-radius: 4px; cursor: pointer;
@@ -40,15 +45,6 @@
       @keyframes pulse {
         0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
       }
-      #error-log {
-        margin-top: 12px; border-top: 1px solid #333; padding: 8px 12px;
-      }
-      #error-log h3 { font-size: 11px; color: #888; margin-bottom: 6px; }
-      .error-entry {
-        font-size: 11px; color: #f44336; padding: 2px 0;
-        border-bottom: 1px solid #222; word-break: break-all;
-      }
-      #no-errors { font-size: 11px; color: #555; }
       #controls {
         display: none; justify-content: space-between; align-items: center;
         padding: 6px 12px; background: #1a1a1a; border-bottom: 1px solid #333;
@@ -63,21 +59,67 @@
       .ctrl-btn:active { background: #3a3a3a; }
       .ctrl-btn.primary { border-color: #4caf50; color: #4caf50; }
       .ctrl-btn.danger  { border-color: #f44336; color: #f44336; }
+      #settings-panel { display: none; padding: 12px; }
+      .settings-heading {
+        font-size: 13px; color: #aaa; font-weight: bold;
+        text-transform: uppercase; letter-spacing: 0.05em;
+        margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #333;
+      }
+      .settings-row {
+        display: flex; align-items: center; gap: 8px;
+        margin-bottom: 8px;
+      }
+      .settings-label { font-size: 12px; color: #888; min-width: 80px; }
+      .settings-value { font-size: 12px; color: #ccc; }
+      #host-input {
+        flex: 1; background: #1e1e1e; border: 1px solid #444; color: #eee;
+        font-family: monospace; font-size: 12px; padding: 4px 8px;
+        border-radius: 4px; outline: none;
+      }
+      #host-input:focus { border-color: #666; }
+      #save-host-btn {
+        padding: 4px 10px; border-radius: 4px; border: 1px solid #4caf50;
+        background: #1a2e1a; color: #4caf50; font-family: monospace; font-size: 12px;
+        cursor: pointer;
+      }
+      #save-host-btn:active { background: #2a3e2a; }
+      #save-status { font-size: 11px; color: #888; margin-bottom: 12px; min-height: 16px; }
+      #error-log { margin-top: 16px; border-top: 1px solid #333; padding-top: 10px; }
+      #error-log h3 { font-size: 11px; color: #888; margin-bottom: 6px; }
+      .error-entry {
+        font-size: 11px; color: #f44336; padding: 2px 0;
+        border-bottom: 1px solid #222; word-break: break-all;
+      }
+      #no-errors { font-size: 11px; color: #555; }
     </style>
   </head>
   <body>
     <div id="status-bar">
       <span id="ws-status" class="disconnected">WS: disconnected</span>
       <span id="view-label">–</span>
+      <button id="settings-btn" title="Settings">⚙</button>
     </div>
     <div id="controls">
       <button id="ctrl-back" class="ctrl-btn">Back</button>
       <button id="ctrl-action" class="ctrl-btn primary">Talk</button>
     </div>
     <div id="content"></div>
-    <div id="error-log">
-      <h3>ERRORS</h3>
-      <div id="no-errors">none</div>
+    <div id="settings-panel">
+      <div class="settings-heading">Settings</div>
+      <div class="settings-row">
+        <span class="settings-label">Version</span>
+        <span class="settings-value" id="app-version">–</span>
+      </div>
+      <div class="settings-row">
+        <label class="settings-label" for="host-input">Home Server</label>
+        <input id="host-input" type="text" placeholder="srv:4000" />
+        <button id="save-host-btn">Save</button>
+      </div>
+      <div id="save-status"></div>
+      <div id="error-log">
+        <h3>ERRORS</h3>
+        <div id="no-errors">none</div>
+      </div>
     </div>
     <script type="module" src="/src/index.ts"></script>
   </body>
