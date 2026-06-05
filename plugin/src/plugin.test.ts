@@ -25,8 +25,7 @@ afterEach(() => {
 function makePlugin() {
   const bridge = makeMockBridge()
   const fakeWs = new FakeWebSocket()
-  const MockWS = vi.fn().mockReturnValue(fakeWs)
-  MockWS.OPEN = 1
+  const MockWS = Object.assign(vi.fn().mockReturnValue(fakeWs), { OPEN: 1 })
   vi.stubGlobal('WebSocket', MockWS)
   const plugin = createPlugin(bridge, 'ws://localhost:4000/ws')
   return { bridge, plugin, ws: fakeWs, MockWS }
