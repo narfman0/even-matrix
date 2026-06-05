@@ -245,7 +245,8 @@ export function createPlugin(
       const wav = pcmToWav(pcm, 16000)
       const form = new FormData()
       form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav')
-      const res = await fetch(`${whisperUrl}/inference`, { method: 'POST', body: form })
+      form.append('model', 'Systran/faster-whisper-small')
+      const res = await fetch(`${whisperUrl}/v1/audio/transcriptions`, { method: 'POST', body: form })
       if (!res.ok) throw new Error(`whisper: ${res.status}`)
       const { text } = await res.json() as { text?: string }
       if (text?.trim() && selectedRoomId) {
