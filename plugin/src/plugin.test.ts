@@ -573,7 +573,7 @@ describe('auto-follow behavior', () => {
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
     expect(plugin.getState().view).toBe('messages')
     expect(plugin.getState().scrollOffset).toBe(0)
-    expect(bridge.rebuildPageContainer).toHaveBeenCalledOnce()
+    expect(bridge.rebuildPageContainer).toHaveBeenCalledTimes(2) // loading indicator + messages view
   })
 
   it('new messages do not update display while scrolled into history', async () => {

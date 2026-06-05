@@ -304,6 +304,27 @@ export function createPlugin(
         if (item && !item.isHeader) {
           log('info', 'room selected', { id: item.id, name: item.name })
           selectedRoomId = item.id
+          const loadingNames = displayedRooms.map((r, i) =>
+            i === index ? `${r.name.slice(0, 60)}...` : r.name.slice(0, 64)
+          )
+          try {
+            await bridge.rebuildPageContainer(new RebuildPageContainer({
+              containerTotalNum: 1,
+              listObject: [new ListContainerProperty({
+                xPosition: 0, yPosition: 0, width: 576, height: 288,
+                borderWidth: 0, paddingLength: 4,
+                containerID: CONTAINER_ID, containerName: 'rooms',
+                itemContainer: new ListItemContainerProperty({
+                  itemCount: loadingNames.length,
+                  itemName: loadingNames,
+                  isItemSelectBorderEn: 1,
+                }),
+                isEventCapture: 1,
+              })],
+            }))
+          } catch (err) {
+            log('error', 'rebuildPageContainer (loading indicator) failed', err)
+          }
           try {
             const history = await matrix.fetchHistory(item.id, 50)
             seenEventIds = new Set(history.map((m: MatrixMessage) => m.event_id).filter(Boolean))
