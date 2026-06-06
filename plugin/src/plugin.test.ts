@@ -322,8 +322,10 @@ describe('handleEvenHubEvent', () => {
   })
 
   it('back gesture (no eventType) navigates to rooms', async () => {
+    vi.useFakeTimers()
     const { bridge, plugin, matrix } = makePlugin()
     await goToMessages(matrix, plugin)
+    vi.advanceTimersByTime(501)
     bridge.rebuildPageContainer.mockClear()
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: undefined } })
     expect(bridge.rebuildPageContainer).toHaveBeenCalled()

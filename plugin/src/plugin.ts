@@ -122,6 +122,7 @@ export function createPlugin(
   let scrollOffset = 0
   let listeningStartedAt = 0
   let navSeq = 0
+  let roomNavStartedAt = 0
 
   function pushError(msg: string, data?: any) {
     const entry = data !== undefined
@@ -333,6 +334,7 @@ export function createPlugin(
         const item = displayedRooms[index]
         if (item && !item.isHeader) {
           log('info', 'room selected', { id: item.id, name: item.name })
+          roomNavStartedAt = Date.now()
           const seq = ++navSeq
           selectedRoomId = item.id
           await showLoadingView(item.name)
@@ -359,7 +361,9 @@ export function createPlugin(
       if (view === 'listening' && recognizing && Date.now() - listeningStartedAt > 1000) {
         await stopAudio()
       } else if (view === 'loading') {
-        await showRoomList()
+        if (et === undefined && Date.now() - roomNavStartedAt > 500) {
+          await showRoomList()
+        }
       } else if (view === 'messages') {
         if (et === OsEventTypeList.DOUBLE_CLICK_EVENT) {
           await startAudio()
@@ -384,8 +388,12 @@ export function createPlugin(
             log('error', 'textContainerUpgrade (scroll up) failed', err)
           }
         } else if (et === undefined) {
-          log('info', 'back gesture (no eventType) → showRoomList')
-          await showRoomList()
+          if (Date.now() - roomNavStartedAt > 500) {
+            log('info', 'back gesture (no eventType) → showRoomList')
+            await showRoomList()
+          } else {
+            log('info', 'back gesture ignored — within nav cooldown')
+          }
         } else {
           log('warn', 'unhandled sysEvent in messages view', { eventType: et })
         }
