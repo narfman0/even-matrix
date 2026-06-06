@@ -265,9 +265,9 @@ export function createPlugin(
     }
   }
 
-  async function transcribeAndSend() {
+  async function transcribeAndSend(chunks: Uint8Array[], roomId: string) {
     try {
-      const pcm = mergeChunks(audioBuf)
+      const pcm = mergeChunks(chunks)
       const wav = pcmToWav(pcm, 16000)
       const form = new FormData()
       form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav')
@@ -275,8 +275,8 @@ export function createPlugin(
       const res = await fetch(`${whisperUrl}/v1/audio/transcriptions`, { method: 'POST', body: form })
       if (!res.ok) throw new Error(`whisper: ${res.status}`)
       const { text } = await res.json() as { text?: string }
-      if (text?.trim() && selectedRoomId) {
-        await matrix.sendMessage(selectedRoomId, text.trim())
+      if (text?.trim()) {
+        await matrix.sendMessage(roomId, text.trim())
       }
     } catch (err) {
       log('error', 'transcribeAndSend failed', err)
@@ -285,18 +285,21 @@ export function createPlugin(
   }
 
   async function stopAudio() {
+    if (!recognizing) return
     log('info', 'stopAudio', { audioBufChunks: audioBuf.length })
     recognizing = false
+    const chunks = audioBuf
+    const roomId = selectedRoomId
+    audioBuf = []
     try {
       await bridge.audioControl(false)
     } catch (err) {
       log('error', 'audioControl(false) failed', err)
       pushError('audioControl(false) failed', String(err))
     }
-    if (whisperUrl && audioBuf.length > 0 && selectedRoomId) {
-      await transcribeAndSend()
+    if (whisperUrl && chunks.length > 0 && roomId) {
+      await transcribeAndSend(chunks, roomId)
     }
-    audioBuf = []
     await showMessageView(lines)
   }
 
@@ -353,7 +356,7 @@ export function createPlugin(
     if (event.sysEvent) {
       const et = event.sysEvent.eventType
       log('info', 'sysEvent', { eventType: et, view, msSinceListeningStart: Date.now() - listeningStartedAt })
-      if (view === 'listening' && Date.now() - listeningStartedAt > 1000) {
+      if (view === 'listening' && recognizing && Date.now() - listeningStartedAt > 1000) {
         await stopAudio()
       } else if (view === 'loading') {
         await showRoomList()
