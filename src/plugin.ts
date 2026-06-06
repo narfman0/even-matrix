@@ -504,8 +504,19 @@ export function createPlugin(
     if (index !== -1) await handleEvenHubEvent({ listEvent: { currentSelectItemIndex: index } })
   }
 
+  let lastSentText = ''
+  let lastSentAt = 0
+  const SEND_DEDUP_MS = 5000
+
   async function sendMessage(text: string) {
     if (!selectedRoomId || !text.trim()) return
+    const now = Date.now()
+    if (text.trim() === lastSentText && now - lastSentAt < SEND_DEDUP_MS) {
+      log('info', 'sendMessage duplicate suppressed', { text: text.trim() })
+      return
+    }
+    lastSentText = text.trim()
+    lastSentAt = now
     try {
       await matrix.sendMessage(selectedRoomId, text.trim())
     } catch (err) {
