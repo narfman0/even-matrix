@@ -10,9 +10,10 @@ export interface MatrixMessage {
 }
 
 export interface MatrixClient {
+  readonly senderName: string
   initialSync(): Promise<{ hierarchy: RoomHierarchy; nextBatch: string }>
   fetchHistory(roomId: string, limit: number, signal?: AbortSignal): Promise<MatrixMessage[]>
-  sendMessage(roomId: string, text: string): Promise<void>
+  sendMessage(roomId: string, text: string): Promise<string>
   startSyncLoop(
     since: string,
     onMessage: (roomId: string, eventId: string, sender: string, text: string) => void,
@@ -151,15 +152,20 @@ export class MatrixRestClient implements MatrixClient {
     return msgs
   }
 
-  async sendMessage(roomId: string, text: string): Promise<void> {
+  get senderName(): string {
+    return this.displaySender(this.userId)
+  }
+
+  async sendMessage(roomId: string, text: string): Promise<string> {
     const txnId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
       const r = Math.random() * 16 | 0
       return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
     })
-    await this.put(
+    const result = await this.put<{ event_id: string }>(
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txnId}`,
       { msgtype: 'm.text', body: text }
     )
+    return result.event_id
   }
 
   startSyncLoop(
