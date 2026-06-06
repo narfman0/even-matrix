@@ -19,6 +19,8 @@ export interface Bridge {
 const DISPLAY_MAX_LINES = 20
 const DISPLAY_MAX_BYTES = 990
 const SCROLL_STEP = 3
+const ROLLING_INTERVAL_MS = 3000
+const ROLLING_MIN_BYTES = 32000
 
 type DisplayItem = RoomInfo & { isHeader: boolean }
 
@@ -125,6 +127,8 @@ export function createPlugin(
   let navSeq = 0
   let roomNavStartedAt = 0
   let navAbort: AbortController | null = null
+  let rollingTimer: ReturnType<typeof setTimeout> | null = null
+  let rollingAbort: AbortController | null = null
 
   function pushError(msg: string, data?: any) {
     const entry = data !== undefined
@@ -376,10 +380,57 @@ export function createPlugin(
     }
   }
 
+  async function updateListeningText(text: string) {
+    transcribedText = text
+    onUpdate?.()
+    if (view === 'listening') {
+      try {
+        await bridge.textContainerUpgrade(new TextContainerUpgrade({
+          containerID: CONTAINER_ID,
+          content: text || 'Listening...',
+        }))
+      } catch (err) {
+        log('error', 'textContainerUpgrade (listening partial) failed', err)
+      }
+    }
+  }
+
+  async function fireRollingTranscription(chunks: Uint8Array[], signal: AbortSignal) {
+    if (!whisperUrl || chunks.length === 0) return
+    const totalBytes = chunks.reduce((n, c) => n + c.length, 0)
+    if (totalBytes < ROLLING_MIN_BYTES) return
+    try {
+      const wav = pcmToWav(mergeChunks(chunks), 16000)
+      const form = new FormData()
+      form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav')
+      form.append('model', whisperModel)
+      const res = await fetch(`${whisperUrl}/v1/audio/transcriptions`, { method: 'POST', body: form, signal })
+      if (!res.ok) return
+      const json = await res.json() as { text?: string }
+      const text = json.text?.trim()
+      if (text && !signal.aborted) await updateListeningText(text)
+    } catch (err) {
+      if ((err as any)?.name !== 'AbortError') log('warn', 'rolling transcription failed', err)
+    }
+  }
+
+  function scheduleRolling() {
+    rollingTimer = setTimeout(async () => {
+      if (!recognizing) return
+      const chunks = audioBuf.slice()
+      rollingAbort?.abort()
+      rollingAbort = new AbortController()
+      await fireRollingTranscription(chunks, rollingAbort.signal)
+      if (recognizing) scheduleRolling()
+    }, ROLLING_INTERVAL_MS)
+  }
+
   async function stopAudio() {
     if (!recognizing) return
     log('info', 'stopAudio', { audioBufChunks: audioBuf.length })
     recognizing = false
+    if (rollingTimer !== null) { clearTimeout(rollingTimer); rollingTimer = null }
+    rollingAbort?.abort(); rollingAbort = null
     const chunks = audioBuf
     const roomId = selectedRoomId
     audioBuf = []
@@ -400,7 +451,9 @@ export function createPlugin(
     recognizing = true
     listeningStartedAt = Date.now()
     audioBuf = []
+    transcribedText = ''
     await showListeningView()
+    scheduleRolling()
     try {
       await bridge.audioControl(true)
     } catch (err) {

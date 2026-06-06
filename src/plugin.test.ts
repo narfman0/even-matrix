@@ -630,6 +630,82 @@ describe('room hierarchy', () => {
   })
 })
 
+// ─── Rolling transcription ────────────────────────────────────────────────────
+
+describe('rolling transcription', () => {
+  const ENOUGH_BYTES = 32001
+
+  it('fires after ROLLING_INTERVAL_MS and updates listening view with partial text', async () => {
+    vi.useFakeTimers()
+    const { bridge, plugin, matrix } = makePlugin('http://whisper:8080')
+    await goToMessages(matrix, plugin)
+    await plugin.startAudio()
+    // Feed enough PCM to exceed ROLLING_MIN_BYTES
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: new Uint8Array(ENOUGH_BYTES) } })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ text: 'partial text' }),
+    }))
+    bridge.textContainerUpgrade.mockClear()
+    await vi.advanceTimersByTimeAsync(3001)
+    const upgrades = bridge.textContainerUpgrade.mock.calls
+    expect(upgrades.some((c: any) => c[0].content === 'partial text')).toBe(true)
+    expect(plugin.getState().view).toBe('listening')
+    vi.clearAllTimers()
+    await plugin.stopAudio()
+  })
+
+  it('does not fire when audioBuf is below ROLLING_MIN_BYTES', async () => {
+    vi.useFakeTimers()
+    const { plugin, matrix } = makePlugin('http://whisper:8080')
+    await goToMessages(matrix, plugin)
+    await plugin.startAudio()
+    // Tiny chunk — below threshold
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: new Uint8Array(100) } })
+    const mockFetch = vi.fn()
+    vi.stubGlobal('fetch', mockFetch)
+    await vi.advanceTimersByTimeAsync(3001)
+    expect(mockFetch).not.toHaveBeenCalled()
+    vi.clearAllTimers()
+    await plugin.stopAudio()
+  })
+
+  it('cancels in-flight rolling request on stopAudio', async () => {
+    vi.useFakeTimers()
+    const { plugin, matrix } = makePlugin('http://whisper:8080')
+    await goToMessages(matrix, plugin)
+    await plugin.startAudio()
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: new Uint8Array(ENOUGH_BYTES) } })
+    let capturedSignal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce((_url: string, opts: RequestInit) => {
+      capturedSignal = opts.signal as AbortSignal
+      return new Promise(() => {}) // never resolves — simulates slow server
+    }))
+    // Trigger rolling call
+    vi.advanceTimersByTime(3001)
+    // Stop audio while rolling call is in-flight
+    vi.useRealTimers()
+    await plugin.stopAudio()
+    expect(capturedSignal?.aborted).toBe(true)
+  })
+
+  it('keeps view as listening during rolling (does not change to transcribing)', async () => {
+    vi.useFakeTimers()
+    const { plugin, matrix } = makePlugin('http://whisper:8080')
+    await goToMessages(matrix, plugin)
+    await plugin.startAudio()
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: new Uint8Array(ENOUGH_BYTES) } })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ text: 'partial' }),
+    }))
+    await vi.advanceTimersByTimeAsync(3001)
+    expect(plugin.getState().view).toBe('listening')
+    vi.clearAllTimers()
+    await plugin.stopAudio()
+  })
+})
+
 // ─── Auto-follow behavior ─────────────────────────────────────────────────────
 
 describe('auto-follow behavior', () => {
