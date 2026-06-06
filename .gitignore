@@ -1,4 +1,4 @@
-plugin/node_modules
-plugin/dist
-plugin/*.ehpk
+node_modules
+dist
+*.ehpk
 *.log
