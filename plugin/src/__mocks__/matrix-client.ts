@@ -6,11 +6,11 @@ export function makeFakeMatrixClient() {
   let onTokenCb: ((token: string) => void) | null = null
 
   return {
-    listRoomsHierarchical: vi.fn<[], Promise<RoomHierarchy>>().mockResolvedValue({ dms: [], spaces: [], orphans: [] }),
+    initialSync: vi.fn().mockResolvedValue({ hierarchy: { dms: [], spaces: [], orphans: [] }, nextBatch: 'batch-0' }),
     fetchHistory: vi.fn().mockResolvedValue([]),
     sendMessage: vi.fn().mockResolvedValue(undefined),
     startSyncLoop: vi.fn((
-      _since: string | null,
+      _since: string,
       onMsg: (roomId: string, eventId: string, sender: string, text: string) => void,
       onToken: (token: string) => void
     ) => {

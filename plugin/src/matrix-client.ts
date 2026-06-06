@@ -10,11 +10,11 @@ export interface MatrixMessage {
 }
 
 export interface MatrixClient {
-  listRoomsHierarchical(): Promise<RoomHierarchy>
+  initialSync(): Promise<{ hierarchy: RoomHierarchy; nextBatch: string }>
   fetchHistory(roomId: string, limit: number): Promise<MatrixMessage[]>
   sendMessage(roomId: string, text: string): Promise<void>
   startSyncLoop(
-    since: string | null,
+    since: string,
     onMessage: (roomId: string, eventId: string, sender: string, text: string) => void,
     onSyncToken: (token: string) => void
   ): void
@@ -72,44 +72,49 @@ export class MatrixRestClient implements MatrixClient {
     return res.json() as Promise<{ access_token: string; device_id: string; user_id: string }>
   }
 
-  async listRoomsHierarchical(): Promise<RoomHierarchy> {
-    const { joined_rooms } = await this.get<{ joined_rooms: string[] }>('/_matrix/client/v3/joined_rooms')
+  async initialSync(): Promise<{ hierarchy: RoomHierarchy; nextBatch: string }> {
+    const filter = encodeURIComponent(JSON.stringify({
+      room: {
+        state: { types: ['m.room.name', 'm.room.create', 'm.space.child', 'm.room.member'] },
+        timeline: { limit: 0 },
+        ephemeral: { limit: 0 },
+        account_data: { limit: 0 },
+      },
+      account_data: { limit: 0 },
+      presence: { limit: 0 },
+    }))
+    const data = await this.get<any>(`/_matrix/client/v3/sync?timeout=0&filter=${filter}`)
+    const nextBatch: string = data.next_batch
 
     const dms: RoomInfo[] = []
     const spacesMap = new Map<string, SpaceInfo>()
     const spaceChildren = new Map<string, string[]>()
     const nonSpaceRooms: RoomInfo[] = []
 
-    await Promise.all(joined_rooms.map(async (roomId) => {
-      try {
-        const stateEvents = await this.get<any[]>(
-          `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`
-        )
+    for (const [roomId, roomData] of Object.entries(data.rooms?.join ?? {} as Record<string, any>)) {
+      const stateEvents: any[] = (roomData as any).state?.events ?? []
 
-        const nameEvent = stateEvents.find(e => e.type === 'm.room.name' && e.state_key === '')
-        const createEvent = stateEvents.find(e => e.type === 'm.room.create' && e.state_key === '')
-        const memberEvent = stateEvents.find(e =>
-          e.type === 'm.room.member' &&
-          e.state_key === this.userId &&
-          e.content?.is_direct === true
-        )
-        const childEvents = stateEvents.filter(e => e.type === 'm.space.child' && e.content?.via)
+      const nameEvent = stateEvents.find(e => e.type === 'm.room.name' && e.state_key === '')
+      const createEvent = stateEvents.find(e => e.type === 'm.room.create' && e.state_key === '')
+      const memberEvent = stateEvents.find(e =>
+        e.type === 'm.room.member' &&
+        e.state_key === this.userId &&
+        e.content?.is_direct === true
+      )
+      const childEvents = stateEvents.filter(e => e.type === 'm.space.child' && e.content?.via)
 
-        const name: string = nameEvent?.content?.name ?? roomId
-        const isSpace = createEvent?.content?.type === 'm.space'
-        const isDM = !!memberEvent
+      const name: string = nameEvent?.content?.name ?? roomId
+      const isSpace = createEvent?.content?.type === 'm.space'
+      const isDM = !!memberEvent
 
-        if (isSpace) {
-          spacesMap.set(roomId, { id: roomId, name, rooms: [] })
-          spaceChildren.set(roomId, childEvents.map((e: any) => e.state_key as string))
-        } else {
-          nonSpaceRooms.push({ id: roomId, name })
-          if (isDM) dms.push({ id: roomId, name })
-        }
-      } catch {
-        // skip rooms we can't read state for
+      if (isSpace) {
+        spacesMap.set(roomId, { id: roomId, name, rooms: [] })
+        spaceChildren.set(roomId, childEvents.map((e: any) => e.state_key as string))
+      } else {
+        nonSpaceRooms.push({ id: roomId, name })
+        if (isDM) dms.push({ id: roomId, name })
       }
-    }))
+    }
 
     const childIds = new Set([...spaceChildren.values()].flat())
     const dmIds = new Set(dms.map(d => d.id))
@@ -123,7 +128,7 @@ export class MatrixRestClient implements MatrixClient {
       spaces.push({ ...space, rooms: children })
     }
 
-    return { dms, spaces, orphans }
+    return { hierarchy: { dms, spaces, orphans }, nextBatch }
   }
 
   async fetchHistory(roomId: string, limit: number): Promise<MatrixMessage[]> {
@@ -154,7 +159,7 @@ export class MatrixRestClient implements MatrixClient {
   }
 
   startSyncLoop(
-    since: string | null,
+    since: string,
     onMessage: (roomId: string, eventId: string, sender: string, text: string) => void,
     onSyncToken: (token: string) => void
   ): void {
@@ -163,16 +168,14 @@ export class MatrixRestClient implements MatrixClient {
   }
 
   private async runSyncLoop(
-    since: string | null,
+    since: string,
     onMessage: (roomId: string, eventId: string, sender: string, text: string) => void,
     onSyncToken: (token: string) => void
   ): Promise<void> {
     while (!this.stopSync) {
       try {
         this.abortController = new AbortController()
-        const timeout = since ? 30000 : 0
-        const params = new URLSearchParams({ timeout: String(timeout) })
-        if (since) params.set('since', since)
+        const params = new URLSearchParams({ timeout: '30000', since })
         const res = await fetch(`${this.homeserver}/_matrix/client/v3/sync?${params}`, {
           headers: this.authHeaders(),
           signal: this.abortController.signal,

@@ -251,9 +251,10 @@ export function createPlugin(
     syncToken = token
     onUpdate?.()
     try {
-      hierarchy = await matrix.listRoomsHierarchical()
+      const { hierarchy: h, nextBatch } = await matrix.initialSync()
+      hierarchy = h
       await showRoomList()
-      matrix.startSyncLoop(token, onSyncMessage, (newToken) => {
+      matrix.startSyncLoop(token ?? nextBatch, onSyncMessage, (newToken) => {
         syncToken = newToken
         onUpdate?.()
       })

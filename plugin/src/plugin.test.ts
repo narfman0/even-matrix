@@ -36,7 +36,7 @@ async function seedRooms(
   plugin: ReturnType<typeof createPlugin>,
   rooms: Array<{ id: string; name: string }>
 ) {
-  matrix.listRoomsHierarchical.mockResolvedValueOnce({ dms: [], spaces: [], orphans: rooms })
+  matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: rooms }, nextBatch: 'batch-0' })
   await plugin.start(null)
 }
 
@@ -46,7 +46,7 @@ async function goToMessages(
   messages: Array<{ sender: string; text: string }> = []
 ) {
   if (plugin.getState().displayedRooms.length === 0) {
-    matrix.listRoomsHierarchical.mockResolvedValueOnce({ dms: [], spaces: [], orphans: [DEFAULT_ROOM] })
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [DEFAULT_ROOM] }, nextBatch: 'batch-0' })
     await plugin.start(null)
   }
   matrix.fetchHistory.mockResolvedValueOnce(
@@ -168,16 +168,23 @@ describe('appendLine', () => {
 describe('start()', () => {
   it('fetches room list and shows room list', async () => {
     const { bridge, plugin, matrix } = makePlugin()
-    matrix.listRoomsHierarchical.mockResolvedValueOnce({ dms: [], spaces: [], orphans: [{ id: 'r1', name: 'Room1' }] })
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'r1', name: 'Room1' }] }, nextBatch: 'batch-0' })
     await plugin.start(null)
-    expect(matrix.listRoomsHierarchical).toHaveBeenCalledOnce()
+    expect(matrix.initialSync).toHaveBeenCalledOnce()
     expect(bridge.rebuildPageContainer).toHaveBeenCalled()
   })
 
-  it('passes sync token to startSyncLoop', async () => {
+  it('passes persisted sync token to startSyncLoop when available', async () => {
     const { plugin, matrix } = makePlugin()
     await plugin.start('s_abc123')
     expect(matrix.startSyncLoop).toHaveBeenCalledWith('s_abc123', expect.any(Function), expect.any(Function))
+  })
+
+  it('uses nextBatch from initialSync when no persisted token', async () => {
+    const { plugin, matrix } = makePlugin()
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [] }, nextBatch: 's_fresh' })
+    await plugin.start(null)
+    expect(matrix.startSyncLoop).toHaveBeenCalledWith('s_fresh', expect.any(Function), expect.any(Function))
   })
 
   it('sets matrixConnected to true', async () => {
@@ -192,7 +199,7 @@ describe('start()', () => {
 describe('sync message handling', () => {
   it('appends message when room matches selected room', async () => {
     const { bridge, plugin, matrix } = makePlugin()
-    matrix.listRoomsHierarchical.mockResolvedValueOnce({ dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] })
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
     await plugin.start(null)
     matrix.fetchHistory.mockResolvedValueOnce([])
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
@@ -203,7 +210,7 @@ describe('sync message handling', () => {
 
   it('ignores message when room does not match', async () => {
     const { bridge, plugin, matrix } = makePlugin()
-    matrix.listRoomsHierarchical.mockResolvedValueOnce({ dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] })
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
     await plugin.start(null)
     matrix.fetchHistory.mockResolvedValueOnce([])
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
@@ -214,7 +221,7 @@ describe('sync message handling', () => {
 
   it('deduplicates messages by event_id', async () => {
     const { bridge, plugin, matrix } = makePlugin()
-    matrix.listRoomsHierarchical.mockResolvedValueOnce({ dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] })
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
     await plugin.start(null)
     matrix.fetchHistory.mockResolvedValueOnce([{ event_id: 'ev-1', sender: 'Alice', text: 'Hi', ts: 0 }])
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
@@ -501,7 +508,7 @@ describe('stopAudio', () => {
 describe('room hierarchy', () => {
   it('DMs section adds header at index 0 followed by DM rooms', async () => {
     const { bridge, plugin, matrix } = makePlugin()
-    matrix.listRoomsHierarchical.mockResolvedValueOnce({ dms: [{ id: 'dm-1', name: 'Alice' }], spaces: [], orphans: [] })
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [{ id: 'dm-1', name: 'Alice' }], spaces: [], orphans: [] }, nextBatch: 'batch-0' })
     await plugin.start(null)
     const names = bridge.rebuildPageContainer.mock.calls[0][0].listObject[0].itemContainer.itemName
     expect(names[0]).toBe('── DMs ──')
@@ -510,11 +517,11 @@ describe('room hierarchy', () => {
 
   it('space section adds space header and child rooms', async () => {
     const { bridge, plugin, matrix } = makePlugin()
-    matrix.listRoomsHierarchical.mockResolvedValueOnce({
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: {
       dms: [],
       spaces: [{ id: 'sp-1', name: 'ACME', rooms: [{ id: 'r-1', name: 'general' }] }],
       orphans: [],
-    })
+    }, nextBatch: 'batch-0' })
     await plugin.start(null)
     const names = bridge.rebuildPageContainer.mock.calls[0][0].listObject[0].itemContainer.itemName
     expect(names[0]).toBe('── ACME ──')
@@ -530,11 +537,11 @@ describe('room hierarchy', () => {
 
   it('orphans get Other header when DMs are also present', async () => {
     const { bridge, plugin, matrix } = makePlugin()
-    matrix.listRoomsHierarchical.mockResolvedValueOnce({
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: {
       dms: [{ id: 'dm-1', name: 'Alice' }],
       spaces: [],
       orphans: [{ id: 'r-1', name: 'general' }],
-    })
+    }, nextBatch: 'batch-0' })
     await plugin.start(null)
     const names = bridge.rebuildPageContainer.mock.calls[0][0].listObject[0].itemContainer.itemName
     expect(names).toEqual(['── DMs ──', 'Alice', '── Other ──', 'general'])
@@ -542,7 +549,7 @@ describe('room hierarchy', () => {
 
   it('clicking a section header does not select a room', async () => {
     const { plugin, matrix } = makePlugin()
-    matrix.listRoomsHierarchical.mockResolvedValueOnce({ dms: [{ id: 'dm-1', name: 'Alice' }], spaces: [], orphans: [] })
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [{ id: 'dm-1', name: 'Alice' }], spaces: [], orphans: [] }, nextBatch: 'batch-0' })
     await plugin.start(null)
     // index 0 is the '── DMs ──' header
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
@@ -552,7 +559,7 @@ describe('room hierarchy', () => {
 
   it('clicking a room after a header selects the correct room', async () => {
     const { plugin, matrix } = makePlugin()
-    matrix.listRoomsHierarchical.mockResolvedValueOnce({ dms: [{ id: 'dm-1', name: 'Alice' }], spaces: [], orphans: [] })
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [{ id: 'dm-1', name: 'Alice' }], spaces: [], orphans: [] }, nextBatch: 'batch-0' })
     await plugin.start(null)
     matrix.fetchHistory.mockResolvedValueOnce([])
     // index 1 is 'Alice' (after the DMs header at index 0)
