@@ -110,8 +110,9 @@ export function createPlugin(
   let displayedRooms: DisplayItem[] = []
   let selectedRoomId: string | null = null
   let lines: string[] = []
-  let view: 'rooms' | 'messages' | 'listening' | 'loading' = 'rooms'
+  let view: 'rooms' | 'messages' | 'listening' | 'loading' | 'transcribing' | 'sending' = 'rooms'
   let loadingRoomName: string = ''
+  let transcribedText: string = ''
   let recognizing = false
   let matrixConnected = false
   let syncToken: string | null = null
@@ -180,6 +181,65 @@ export function createPlugin(
     } catch (err) {
       log('error', 'rebuildPageContainer (listening) failed', err)
       pushError('rebuildPageContainer (listening) failed', String(err))
+    }
+  }
+
+  async function showTranscribingView() {
+    log('info', 'showTranscribingView')
+    view = 'transcribing'
+    transcribedText = ''
+    onUpdate?.()
+    try {
+      await bridge.rebuildPageContainer(new RebuildPageContainer({
+        containerTotalNum: 1,
+        textObject: [new TextContainerProperty({
+          xPosition: 0, yPosition: 0, width: 576, height: 288,
+          borderWidth: 0, paddingLength: 4,
+          containerID: CONTAINER_ID, containerName: 'transcribing',
+          content: 'Transcribing...',
+          isEventCapture: 1,
+        })],
+      }))
+    } catch (err) {
+      log('error', 'rebuildPageContainer (transcribing) failed', err)
+      pushError('rebuildPageContainer (transcribing) failed', String(err))
+    }
+  }
+
+  async function updateTranscribingText(text: string) {
+    transcribedText = text
+    onUpdate?.()
+    if (view === 'transcribing') {
+      try {
+        await bridge.textContainerUpgrade(new TextContainerUpgrade({
+          containerID: CONTAINER_ID,
+          content: text,
+        }))
+      } catch (err) {
+        log('error', 'textContainerUpgrade (transcribing) failed', err)
+      }
+    }
+  }
+
+  async function showSendingView(text: string) {
+    log('info', 'showSendingView', { text })
+    view = 'sending'
+    transcribedText = text
+    onUpdate?.()
+    try {
+      await bridge.rebuildPageContainer(new RebuildPageContainer({
+        containerTotalNum: 1,
+        textObject: [new TextContainerProperty({
+          xPosition: 0, yPosition: 0, width: 576, height: 288,
+          borderWidth: 0, paddingLength: 4,
+          containerID: CONTAINER_ID, containerName: 'sending',
+          content: `Sending: ${text.slice(0, 80)}`,
+          isEventCapture: 1,
+        })],
+      }))
+    } catch (err) {
+      log('error', 'rebuildPageContainer (sending) failed', err)
+      pushError('rebuildPageContainer (sending) failed', String(err))
     }
   }
 
@@ -271,15 +331,43 @@ export function createPlugin(
 
   async function transcribeAndSend(chunks: Uint8Array[], roomId: string) {
     try {
-      const pcm = mergeChunks(chunks)
-      const wav = pcmToWav(pcm, 16000)
+      await showTranscribingView()
+      const wav = pcmToWav(mergeChunks(chunks), 16000)
       const form = new FormData()
       form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav')
       form.append('model', whisperModel)
+      form.append('stream', 'true')
       const res = await fetch(`${whisperUrl}/v1/audio/transcriptions`, { method: 'POST', body: form })
       if (!res.ok) throw new Error(`whisper: ${res.status}`)
-      const { text } = await res.json() as { text?: string }
-      if (text?.trim()) {
+
+      let text = ''
+      if (res.headers?.get?.('content-type')?.includes('text/event-stream') && res.body) {
+        const reader = res.body.getReader()
+        const dec = new TextDecoder()
+        let buf = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          const lines = buf.split('\n')
+          buf = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const raw = line.slice(6).trim()
+            if (raw === '[DONE]') continue
+            try {
+              const { text: t } = JSON.parse(raw) as { text?: string }
+              if (t !== undefined) { text = t; await updateTranscribingText(text) }
+            } catch {}
+          }
+        }
+      } else {
+        const json = await res.json() as { text?: string }
+        text = json.text ?? ''
+      }
+
+      if (text.trim()) {
+        await showSendingView(text.trim())
         await matrix.sendMessage(roomId, text.trim())
       }
     } catch (err) {
@@ -427,7 +515,7 @@ export function createPlugin(
   }
 
   function getState() {
-    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, recognizing, scrollOffset, matrixConnected, errors, syncToken }
+    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken }
   }
 
   return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage, navigateToRoom }

@@ -152,7 +152,10 @@ export class MatrixRestClient implements MatrixClient {
   }
 
   async sendMessage(roomId: string, text: string): Promise<void> {
-    const txnId = crypto.randomUUID()
+    const txnId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+    })
     await this.put(
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txnId}`,
       { msgtype: 'm.text', body: text }

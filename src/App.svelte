@@ -22,6 +22,7 @@
     lines: [],
     view: 'rooms',
     loadingRoomName: '',
+    transcribedText: '',
     recognizing: false,
     scrollOffset: 0,
     matrixConnected: false,
@@ -270,6 +271,16 @@
       <div class="listening-indicator">
         <div class="pulse"></div>Listening...
       </div>
+    {:else if state.view === 'transcribing'}
+      <div class="transcribing-indicator">
+        <div class="spinner">↻</div>
+        {state.transcribedText || 'Transcribing...'}
+      </div>
+    {:else if state.view === 'sending'}
+      <div class="sending-indicator">
+        <div class="spinner">↻</div>
+        Sending: {state.transcribedText}
+      </div>
     {:else}
       <div class="messages">
         {#if visibleLines().length === 0}
@@ -336,6 +347,16 @@
   .listening-indicator {
     display: flex; align-items: center; gap: 8px;
     padding: 16px; color: #4caf50; font-size: 16px;
+  }
+  .transcribing-indicator {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 16px; color: #7eb8f7; font-size: 16px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .sending-indicator {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 16px; color: #f7c67e; font-size: 16px;
+    white-space: pre-wrap; word-break: break-word;
   }
   .pulse {
     width: 12px; height: 12px; border-radius: 50%; background: #4caf50;

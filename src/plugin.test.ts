@@ -503,6 +503,65 @@ describe('stopAudio', () => {
     expect(mockFetch).not.toHaveBeenCalled()
     expect(matrix.sendMessage).not.toHaveBeenCalled()
   })
+
+  it('shows transcribing view before whisper POST', async () => {
+    const { bridge, plugin, matrix } = makePlugin('http://whisper:8080')
+    await goToMessages(matrix, plugin)
+    await plugin.startAudio()
+    bridge.rebuildPageContainer.mockClear()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({ text: 'hi' }),
+    }))
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: new Uint8Array([0]) } })
+    await plugin.stopAudio()
+    const calls = bridge.rebuildPageContainer.mock.calls
+    const transcribingCall = calls.find((c: any) => c[0].textObject?.[0]?.content === 'Transcribing...')
+    expect(transcribingCall).toBeDefined()
+  })
+
+  it('shows sending view with transcribed text', async () => {
+    const { bridge, plugin, matrix } = makePlugin('http://whisper:8080')
+    await goToMessages(matrix, plugin)
+    await plugin.startAudio()
+    bridge.rebuildPageContainer.mockClear()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({ text: 'hello there' }),
+    }))
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: new Uint8Array([0]) } })
+    await plugin.stopAudio()
+    const calls = bridge.rebuildPageContainer.mock.calls
+    const sendingCall = calls.find((c: any) => c[0].textObject?.[0]?.content?.startsWith('Sending:'))
+    expect(sendingCall).toBeDefined()
+  })
+
+  it('SSE streaming: partial transcript updates glass text live', async () => {
+    const { bridge, plugin, matrix } = makePlugin('http://whisper:8080')
+    await goToMessages(matrix, plugin)
+    await plugin.startAudio()
+    const sseBody = new ReadableStream({
+      start(controller) {
+        const enc = new TextEncoder()
+        controller.enqueue(enc.encode('data: {"text":"hello"}\n\n'))
+        controller.enqueue(enc.encode('data: {"text":"hello world"}\n\ndata: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+      ok: true,
+      headers: { get: (h: string) => h === 'content-type' ? 'text/event-stream' : null },
+      body: sseBody,
+    }))
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: new Uint8Array([0]) } })
+    bridge.textContainerUpgrade.mockClear()
+    await plugin.stopAudio()
+    const upgrades = bridge.textContainerUpgrade.mock.calls
+    expect(upgrades.some((c: any) => c[0].content === 'hello world')).toBe(true)
+    expect(matrix.sendMessage).toHaveBeenCalledWith(DEFAULT_ROOM.id, 'hello world')
+  })
 })
 
 // ─── Room hierarchy ───────────────────────────────────────────────────────────
