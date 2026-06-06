@@ -6,7 +6,6 @@ export function makeFakeMatrixClient() {
   let onTokenCb: ((token: string) => void) | null = null
 
   return {
-    senderName: 'me',
     initialSync: vi.fn().mockResolvedValue({ hierarchy: { dms: [], spaces: [], orphans: [] }, nextBatch: 'batch-0' }),
     fetchHistory: vi.fn().mockResolvedValue([]),
     sendMessage: vi.fn().mockResolvedValue(undefined),

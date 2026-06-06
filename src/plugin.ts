@@ -368,9 +368,7 @@ export function createPlugin(
 
       if (text.trim()) {
         await showSendingView(text.trim())
-        const eventId = await matrix.sendMessage(roomId, text.trim())
-        if (eventId) seenEventIds.add(eventId)
-        await appendLine(`${matrix.senderName}: ${text.trim()}`)
+        await matrix.sendMessage(roomId, text.trim())
       }
     } catch (err) {
       log('error', 'transcribeAndSend failed', err)
@@ -509,9 +507,7 @@ export function createPlugin(
   async function sendMessage(text: string) {
     if (!selectedRoomId || !text.trim()) return
     try {
-      const eventId = await matrix.sendMessage(selectedRoomId, text.trim())
-      if (eventId) seenEventIds.add(eventId)
-      await appendLine(`${matrix.senderName}: ${text.trim()}`)
+      await matrix.sendMessage(selectedRoomId, text.trim())
     } catch (err) {
       log('error', 'sendMessage failed', err)
       pushError('sendMessage failed', String(err))

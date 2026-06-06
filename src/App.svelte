@@ -38,7 +38,6 @@
   let saveStatus = $state('')
   let saveColor = $state('#888')
   let msgInput = $state('')
-  let msgSending = $state(false)
 
   let plugin: Plugin | null = null
   let bridge: any = null
@@ -90,12 +89,9 @@
   }
 
   async function sendText() {
-    if (!msgInput.trim() || msgSending) return
-    msgSending = true
-    const text = msgInput.trim()
+    if (!msgInput.trim()) return
+    await plugin?.sendMessage(msgInput.trim())
     msgInput = ''
-    await plugin?.sendMessage(text)
-    msgSending = false
   }
 
   async function saveWhisper() {
@@ -194,7 +190,7 @@
       <input id="msg-input" type="text" placeholder="Type a message..."
         bind:value={msgInput}
         onkeydown={(e) => e.key === 'Enter' && sendText()} />
-      <button class="ctrl-btn primary" onclick={sendText} disabled={msgSending}>{msgSending ? '...' : 'Send'}</button>
+      <button class="ctrl-btn primary" onclick={sendText}>Send</button>
       <button class="ctrl-btn" onclick={() => plugin?.startAudio()}>🎤</button>
     {:else if state.view === 'loading'}
       <button class="ctrl-btn" onclick={() => plugin?.showRoomList()}>Back</button>
