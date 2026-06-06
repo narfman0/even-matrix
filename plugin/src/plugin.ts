@@ -123,6 +123,7 @@ export function createPlugin(
   let listeningStartedAt = 0
   let navSeq = 0
   let roomNavStartedAt = 0
+  let navAbort: AbortController | null = null
 
   function pushError(msg: string, data?: any) {
     const entry = data !== undefined
@@ -133,6 +134,8 @@ export function createPlugin(
   }
 
   async function showRoomList() {
+    navAbort?.abort()
+    navAbort = null
     log('info', 'showRoomList', { dms: hierarchy.dms.length, spaces: hierarchy.spaces.length, orphans: hierarchy.orphans.length })
     view = 'rooms'
     displayedRooms = buildDisplayedRooms(hierarchy)
@@ -334,17 +337,22 @@ export function createPlugin(
         const item = displayedRooms[index]
         if (item && !item.isHeader) {
           log('info', 'room selected', { id: item.id, name: item.name })
+          navAbort?.abort()
+          navAbort = new AbortController()
+          const signal = navAbort.signal
           roomNavStartedAt = Date.now()
           const seq = ++navSeq
           selectedRoomId = item.id
           await showLoadingView(item.name)
           if (seq !== navSeq) return
           try {
-            const history = await matrix.fetchHistory(item.id, 50)
+            const history = await matrix.fetchHistory(item.id, 50, signal)
             if (seq !== navSeq) return
+            navAbort = null
             seenEventIds = new Set(history.map((m: MatrixMessage) => m.event_id).filter(Boolean))
             await showMessageView(history.map((m: MatrixMessage) => `${m.sender}: ${m.text}`))
           } catch (err) {
+            if ((err as any)?.name === 'AbortError') return
             log('error', 'fetchHistory failed', err)
             pushError('fetchHistory failed', String(err))
           }

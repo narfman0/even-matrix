@@ -247,7 +247,7 @@ describe('room selection', () => {
     await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
     matrix.fetchHistory.mockResolvedValueOnce([{ event_id: 'ev1', sender: 'Alice', text: 'Hi', ts: 0 }])
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
-    expect(matrix.fetchHistory).toHaveBeenCalledWith('r1', 50)
+    expect(matrix.fetchHistory).toHaveBeenCalledWith('r1', 50, expect.any(AbortSignal))
     const arg = bridge.rebuildPageContainer.mock.calls.at(-1)![0]
     expect(arg.textObject[0].content).toBe('Alice: Hi')
   })
@@ -258,7 +258,7 @@ describe('room selection', () => {
     matrix.fetchHistory.mockResolvedValueOnce([])
     await plugin.handleEvenHubEvent({ listEvent: { eventType: 'CLICK', currentSelectItemIndex: 1 } })
     expect(plugin.getState().selectedRoomId).toBe('room-b')
-    expect(matrix.fetchHistory).toHaveBeenCalledWith('room-b', 50)
+    expect(matrix.fetchHistory).toHaveBeenCalledWith('room-b', 50, expect.any(AbortSignal))
   })
 })
 
@@ -567,7 +567,7 @@ describe('room hierarchy', () => {
     // index 1 is 'Alice' (after the DMs header at index 0)
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 1 } })
     expect(plugin.getState().selectedRoomId).toBe('dm-1')
-    expect(matrix.fetchHistory).toHaveBeenCalledWith('dm-1', 50)
+    expect(matrix.fetchHistory).toHaveBeenCalledWith('dm-1', 50, expect.any(AbortSignal))
   })
 })
 

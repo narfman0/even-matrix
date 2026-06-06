@@ -11,7 +11,7 @@ export interface MatrixMessage {
 
 export interface MatrixClient {
   initialSync(): Promise<{ hierarchy: RoomHierarchy; nextBatch: string }>
-  fetchHistory(roomId: string, limit: number): Promise<MatrixMessage[]>
+  fetchHistory(roomId: string, limit: number, signal?: AbortSignal): Promise<MatrixMessage[]>
   sendMessage(roomId: string, text: string): Promise<void>
   startSyncLoop(
     since: string,
@@ -38,8 +38,8 @@ export class MatrixRestClient implements MatrixClient {
     return { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' }
   }
 
-  private async get<T>(path: string): Promise<T> {
-    const res = await fetch(`${this.homeserver}${path}`, { headers: this.authHeaders() })
+  private async get<T>(path: string, signal?: AbortSignal): Promise<T> {
+    const res = await fetch(`${this.homeserver}${path}`, { headers: this.authHeaders(), signal })
     if (!res.ok) throw new Error(`GET ${path}: ${res.status}`)
     return res.json()
   }
@@ -131,9 +131,10 @@ export class MatrixRestClient implements MatrixClient {
     return { hierarchy: { dms, spaces, orphans }, nextBatch }
   }
 
-  async fetchHistory(roomId: string, limit: number): Promise<MatrixMessage[]> {
+  async fetchHistory(roomId: string, limit: number, signal?: AbortSignal): Promise<MatrixMessage[]> {
     const data = await this.get<{ chunk: any[] }>(
-      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=${limit}`
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=${limit}`,
+      signal
     )
     const msgs: MatrixMessage[] = []
     for (const event of data.chunk) {
