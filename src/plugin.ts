@@ -16,11 +16,11 @@ export interface Bridge {
   audioControl(open: boolean): Promise<boolean>
 }
 
-const DISPLAY_MAX_LINES = 20
-const DISPLAY_MAX_BYTES = 990
+const DISPLAY_MAX_BYTES = 999
 const SCROLL_STEP = 3
 const ROLLING_INTERVAL_MS = 3000
 const ROLLING_MIN_BYTES = 32000
+const enc = new TextEncoder()
 
 type DisplayItem = RoomInfo & { isHeader: boolean }
 
@@ -53,11 +53,26 @@ function log(level: 'info' | 'warn' | 'error', msg: string, data?: any) {
   }
 }
 
+function byteLen(s: string): number {
+  return enc.encode(s).length
+}
+
+function truncateToBytes(s: string, max: number): string {
+  const bytes = enc.encode(s)
+  if (bytes.length <= max) return s
+  let cut = max - 3 // reserve 3 bytes for the ellipsis (… is 3 bytes in UTF-8)
+  while (cut > 0 && (bytes[cut] & 0xc0) === 0x80) cut-- // back off continuation bytes
+  return new TextDecoder().decode(bytes.slice(0, cut)) + '…'
+}
+
 function buildContent(lines: string[], offset = 0): string {
   const end = Math.max(0, lines.length - offset)
-  const slice = lines.slice(Math.max(0, end - DISPLAY_MAX_LINES), end).reverse()
-  while (slice.length > 0 && slice.join('\n').length > DISPLAY_MAX_BYTES) {
+  const slice = lines.slice(0, end).reverse()
+  while (slice.length > 0 && byteLen(slice.join('\n')) > DISPLAY_MAX_BYTES) {
     slice.pop()
+  }
+  if (slice.length === 0 && end > 0) {
+    return truncateToBytes(lines[end - 1], DISPLAY_MAX_BYTES)
   }
   return slice.join('\n') || '(no messages)'
 }
@@ -123,6 +138,7 @@ export function createPlugin(
   let audioBuf: Uint8Array[] = []
   let seenEventIds: Set<string> = new Set()
   let scrollOffset = 0
+  let prevBatch: string | null = null
   let listeningStartedAt = 0
   let navSeq = 0
   let roomNavStartedAt = 0
@@ -487,11 +503,12 @@ export function createPlugin(
           await showLoadingView(item.name)
           if (seq !== navSeq) return
           try {
-            const history = await matrix.fetchHistory(item.id, 50, signal)
+            const result = await matrix.fetchHistory(item.id, 50, null, signal)
             if (seq !== navSeq) return
             navAbort = null
-            seenEventIds = new Set(history.map((m: MatrixMessage) => m.event_id).filter(Boolean))
-            await showMessageView(history.map((m: MatrixMessage) => `${m.sender}: ${m.text}`))
+            seenEventIds = new Set(result.messages.map((m: MatrixMessage) => m.event_id).filter(Boolean))
+            prevBatch = result.prevBatch
+            await showMessageView(result.messages.map((m: MatrixMessage) => `${m.sender}: ${m.text}`))
           } catch (err) {
             if ((err as any)?.name === 'AbortError') return
             log('error', 'fetchHistory failed', err)
@@ -578,9 +595,24 @@ export function createPlugin(
     }
   }
 
-  function getState() {
-    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken }
+  async function loadMoreHistory() {
+    if (!selectedRoomId || !prevBatch) return
+    try {
+      const result = await matrix.fetchHistory(selectedRoomId, 50, prevBatch)
+      const newLines = result.messages.map((m: MatrixMessage) => `${m.sender}: ${m.text}`)
+      result.messages.forEach(m => { if (m.event_id) seenEventIds.add(m.event_id) })
+      lines = [...newLines, ...lines]
+      prevBatch = result.prevBatch
+      onUpdate?.()
+    } catch (err) {
+      log('error', 'loadMoreHistory failed', err)
+      pushError('loadMoreHistory failed', String(err))
+    }
   }
 
-  return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage, navigateToRoom }
+  function getState() {
+    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken, prevBatch }
+  }
+
+  return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage, navigateToRoom, loadMoreHistory }
 }

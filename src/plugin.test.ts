@@ -49,9 +49,10 @@ async function goToMessages(
     matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [DEFAULT_ROOM] }, nextBatch: 'batch-0' })
     await plugin.start(null)
   }
-  matrix.fetchHistory.mockResolvedValueOnce(
-    messages.map((m, i) => ({ event_id: `ev-${i}`, sender: m.sender, text: m.text, ts: 0 }))
-  )
+  matrix.fetchHistory.mockResolvedValueOnce({
+    messages: messages.map((m, i) => ({ event_id: `ev-${i}`, sender: m.sender, text: m.text, ts: 0 })),
+    prevBatch: null,
+  })
   await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
 }
 
@@ -91,7 +92,7 @@ describe('showRoomList', () => {
 // ─── showMessageView ──────────────────────────────────────────────────────────
 
 describe('showMessageView', () => {
-  it('shows all lines up to DISPLAY_MAX_LINES', async () => {
+  it('shows all messages in order (newest first)', async () => {
     const { bridge, plugin, matrix } = makePlugin()
     const messages = Array.from({ length: 10 }, (_, i) => ({ sender: 'A', text: `msg${i}` }))
     await goToMessages(matrix, plugin, messages)
@@ -102,15 +103,26 @@ describe('showMessageView', () => {
     expect(lines[9]).toBe('A: msg0')
   })
 
-  it('drops oldest lines when byte budget is exceeded', async () => {
+  it('drops oldest messages when byte budget is exceeded', async () => {
     const { bridge, plugin, matrix } = makePlugin()
     const longMsg = 'x'.repeat(200)
     const messages = Array.from({ length: 8 }, (_, i) => ({ sender: 'A', text: `${i}:${longMsg}` }))
     await goToMessages(matrix, plugin, messages)
     const arg = bridge.rebuildPageContainer.mock.calls.at(-1)![0]
     const content = arg.textObject[0].content
-    expect(content.length).toBeLessThanOrEqual(990)
+    expect(content.length).toBeLessThanOrEqual(999)
     expect(content.startsWith(`A: 7:${longMsg}`)).toBe(true)
+  })
+
+  it('shows truncated message instead of "(no messages)" when single message exceeds budget', async () => {
+    const { bridge, plugin, matrix } = makePlugin()
+    const hugeMsg = 'z'.repeat(1100)
+    await goToMessages(matrix, plugin, [{ sender: 'A', text: hugeMsg }])
+    const arg = bridge.rebuildPageContainer.mock.calls.at(-1)![0]
+    const content = arg.textObject[0].content
+    expect(content).not.toBe('(no messages)')
+    expect(content.length).toBeLessThanOrEqual(999)
+    expect(content.startsWith('A: ')).toBe(true)
   })
 
   it('shows fallback when no messages', async () => {
@@ -158,7 +170,7 @@ describe('appendLine', () => {
     bridge.textContainerUpgrade.mockClear()
     await plugin.appendLine(`new:${longMsg}`)
     const arg = bridge.textContainerUpgrade.mock.calls[0][0]
-    expect(arg.content.length).toBeLessThanOrEqual(990)
+    expect(arg.content.length).toBeLessThanOrEqual(999)
     expect(arg.content.startsWith(`new:${longMsg}`)).toBe(true)
   })
 })
@@ -201,7 +213,7 @@ describe('sync message handling', () => {
     const { bridge, plugin, matrix } = makePlugin()
     matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
     await plugin.start(null)
-    matrix.fetchHistory.mockResolvedValueOnce([])
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
     bridge.textContainerUpgrade.mockClear()
     await matrix.triggerSyncMessage('room-1', 'ev-new', 'Bob', 'Hey')
@@ -212,7 +224,7 @@ describe('sync message handling', () => {
     const { bridge, plugin, matrix } = makePlugin()
     matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
     await plugin.start(null)
-    matrix.fetchHistory.mockResolvedValueOnce([])
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
     bridge.textContainerUpgrade.mockClear()
     await matrix.triggerSyncMessage('room-2', 'ev-new', 'Eve', 'X')
@@ -223,7 +235,7 @@ describe('sync message handling', () => {
     const { bridge, plugin, matrix } = makePlugin()
     matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
     await plugin.start(null)
-    matrix.fetchHistory.mockResolvedValueOnce([{ event_id: 'ev-1', sender: 'Alice', text: 'Hi', ts: 0 }])
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [{ event_id: 'ev-1', sender: 'Alice', text: 'Hi', ts: 0 }], prevBatch: null })
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
     bridge.textContainerUpgrade.mockClear()
     // Same event_id already seen in fetchHistory — should be ignored
@@ -245,9 +257,9 @@ describe('room selection', () => {
   it('calls fetchHistory and shows messages', async () => {
     const { bridge, plugin, matrix } = makePlugin()
     await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
-    matrix.fetchHistory.mockResolvedValueOnce([{ event_id: 'ev1', sender: 'Alice', text: 'Hi', ts: 0 }])
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [{ event_id: 'ev1', sender: 'Alice', text: 'Hi', ts: 0 }], prevBatch: null })
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
-    expect(matrix.fetchHistory).toHaveBeenCalledWith('r1', 50, expect.any(AbortSignal))
+    expect(matrix.fetchHistory).toHaveBeenCalledWith('r1', 50, null, expect.any(AbortSignal))
     const arg = bridge.rebuildPageContainer.mock.calls.at(-1)![0]
     expect(arg.textObject[0].content).toBe('Alice: Hi')
   })
@@ -255,10 +267,44 @@ describe('room selection', () => {
   it('sets selectedRoomId', async () => {
     const { plugin, matrix } = makePlugin()
     await seedRooms(matrix, plugin, [{ id: 'room-a', name: 'Alpha' }, { id: 'room-b', name: 'Beta' }])
-    matrix.fetchHistory.mockResolvedValueOnce([])
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
     await plugin.handleEvenHubEvent({ listEvent: { eventType: 'CLICK', currentSelectItemIndex: 1 } })
     expect(plugin.getState().selectedRoomId).toBe('room-b')
-    expect(matrix.fetchHistory).toHaveBeenCalledWith('room-b', 50, expect.any(AbortSignal))
+    expect(matrix.fetchHistory).toHaveBeenCalledWith('room-b', 50, null, expect.any(AbortSignal))
+  })
+})
+
+// ─── loadMoreHistory ─────────────────────────────────────────────────────────
+
+describe('loadMoreHistory', () => {
+  it('fetches older messages using prevBatch and prepends to lines', async () => {
+    const { plugin, matrix } = makePlugin()
+    await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [{ event_id: 'ev2', sender: 'B', text: 'newer', ts: 1 }],
+      prevBatch: 'tok_abc',
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    expect(plugin.getState().prevBatch).toBe('tok_abc')
+
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [{ event_id: 'ev1', sender: 'A', text: 'older', ts: 0 }],
+      prevBatch: null,
+    })
+    await plugin.loadMoreHistory()
+    expect(matrix.fetchHistory).toHaveBeenLastCalledWith('r1', 50, 'tok_abc')
+    const { lines, prevBatch } = plugin.getState()
+    expect(lines[0]).toBe('A: older')
+    expect(lines[1]).toBe('B: newer')
+    expect(prevBatch).toBeNull()
+  })
+
+  it('does nothing when prevBatch is null', async () => {
+    const { plugin, matrix } = makePlugin()
+    await goToMessages(matrix, plugin)
+    matrix.fetchHistory.mockClear()
+    await plugin.loadMoreHistory()
+    expect(matrix.fetchHistory).not.toHaveBeenCalled()
   })
 })
 
@@ -622,11 +668,11 @@ describe('room hierarchy', () => {
     const { plugin, matrix } = makePlugin()
     matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [{ id: 'dm-1', name: 'Alice' }], spaces: [], orphans: [] }, nextBatch: 'batch-0' })
     await plugin.start(null)
-    matrix.fetchHistory.mockResolvedValueOnce([])
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
     // index 1 is 'Alice' (after the DMs header at index 0)
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 1 } })
     expect(plugin.getState().selectedRoomId).toBe('dm-1')
-    expect(matrix.fetchHistory).toHaveBeenCalledWith('dm-1', 50, expect.any(AbortSignal))
+    expect(matrix.fetchHistory).toHaveBeenCalledWith('dm-1', 50, null, expect.any(AbortSignal))
   })
 })
 
@@ -713,7 +759,7 @@ describe('auto-follow behavior', () => {
     const { bridge, plugin, matrix } = makePlugin()
     await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
     bridge.rebuildPageContainer.mockClear()
-    matrix.fetchHistory.mockResolvedValueOnce([{ event_id: 'ev1', sender: 'A', text: 'msg1', ts: 0 }])
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [{ event_id: 'ev1', sender: 'A', text: 'msg1', ts: 0 }], prevBatch: null })
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
     expect(plugin.getState().view).toBe('messages')
     expect(plugin.getState().scrollOffset).toBe(0)

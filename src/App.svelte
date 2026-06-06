@@ -28,6 +28,7 @@
     matrixConnected: false,
     errors: [],
     syncToken: null,
+    prevBatch: null,
   })
   let settingsOpen = $state(false)
   let hsValue = $state('')
@@ -44,9 +45,7 @@
 
   function visibleLines(): string[] {
     const { lines, scrollOffset } = state
-    return lines
-      .slice(Math.max(0, lines.length - 20 - scrollOffset), lines.length - scrollOffset)
-      .reverse()
+    return lines.slice(0, lines.length - scrollOffset).reverse()
   }
 
   const SENDER_COLORS = [
@@ -92,6 +91,10 @@
     if (!msgInput.trim()) return
     await plugin?.sendMessage(msgInput.trim())
     msgInput = ''
+  }
+
+  async function loadMore() {
+    await plugin?.loadMoreHistory()
   }
 
   async function saveWhisper() {
@@ -297,6 +300,9 @@
               {/if}
             </div>
           {/each}
+          {#if state.prevBatch !== null}
+            <button class="load-more-btn" onclick={loadMore}>Load more</button>
+          {/if}
         {/if}
       </div>
     {/if}
@@ -337,6 +343,12 @@
   .msg-sender { font-weight: bold; }
   .msg-text { color: #ccc; }
   .no-msg { color: #555; }
+  .load-more-btn {
+    display: block; width: 100%; margin-top: 8px; padding: 6px;
+    background: none; border: 1px solid #333; color: #666;
+    font-family: monospace; font-size: 13px; cursor: pointer; border-radius: 4px;
+  }
+  .load-more-btn:hover { border-color: #555; color: #aaa; }
   .loading-indicator {
     display: flex; align-items: center; gap: 8px;
     padding: 16px; color: #888; font-size: 16px;

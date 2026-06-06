@@ -11,7 +11,7 @@ export interface MatrixMessage {
 
 export interface MatrixClient {
   initialSync(): Promise<{ hierarchy: RoomHierarchy; nextBatch: string }>
-  fetchHistory(roomId: string, limit: number, signal?: AbortSignal): Promise<MatrixMessage[]>
+  fetchHistory(roomId: string, limit: number, from: string | null, signal?: AbortSignal): Promise<{ messages: MatrixMessage[], prevBatch: string | null }>
   sendMessage(roomId: string, text: string): Promise<void>
   startSyncLoop(
     since: string,
@@ -131,9 +131,10 @@ export class MatrixRestClient implements MatrixClient {
     return { hierarchy: { dms, spaces, orphans }, nextBatch }
   }
 
-  async fetchHistory(roomId: string, limit: number, signal?: AbortSignal): Promise<MatrixMessage[]> {
-    const data = await this.get<{ chunk: any[] }>(
-      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=${limit}`,
+  async fetchHistory(roomId: string, limit: number, from: string | null, signal?: AbortSignal): Promise<{ messages: MatrixMessage[], prevBatch: string | null }> {
+    const fromParam = from ? `&from=${encodeURIComponent(from)}` : ''
+    const data = await this.get<{ chunk: any[], end?: string }>(
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=${limit}${fromParam}`,
       signal
     )
     const msgs: MatrixMessage[] = []
@@ -148,7 +149,7 @@ export class MatrixRestClient implements MatrixClient {
       })
     }
     msgs.reverse()
-    return msgs
+    return { messages: msgs, prevBatch: data.end ?? null }
   }
 
   async sendMessage(roomId: string, text: string): Promise<void> {

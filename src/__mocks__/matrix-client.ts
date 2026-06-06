@@ -7,7 +7,7 @@ export function makeFakeMatrixClient() {
 
   return {
     initialSync: vi.fn().mockResolvedValue({ hierarchy: { dms: [], spaces: [], orphans: [] }, nextBatch: 'batch-0' }),
-    fetchHistory: vi.fn().mockResolvedValue([]),
+    fetchHistory: vi.fn().mockResolvedValue({ messages: [], prevBatch: null }),
     sendMessage: vi.fn().mockResolvedValue(undefined),
     startSyncLoop: vi.fn((
       _since: string,
