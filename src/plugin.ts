@@ -534,7 +534,13 @@ export function createPlugin(
         if (et === OsEventTypeList.DOUBLE_CLICK_EVENT) {
           await startAudio()
         } else if (et === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
-          scrollOffset = Math.min(scrollOffset + SCROLL_STEP, Math.max(0, lines.length - 1))
+          if (scrollOffset >= lines.length - 1 && prevBatch) {
+            const prevCount = lines.length
+            await loadMoreHistory()
+            scrollOffset = Math.min(scrollOffset + (lines.length - prevCount), lines.length - 1)
+          } else {
+            scrollOffset = Math.min(scrollOffset + SCROLL_STEP, Math.max(0, lines.length - 1))
+          }
           try {
             await bridge.textContainerUpgrade(new TextContainerUpgrade({
               containerID: CONTAINER_ID,
