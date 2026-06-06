@@ -32,10 +32,10 @@ Matrix homeserver (Synapse, Conduit, etc.)
 **1. Build and load the plugin**
 
 ```bash
-cd plugin && npm install && npm run build
+npm install && npm run build
 ```
 
-Sideload `plugin/dist/` via EvenHub developer mode → Install from file. Grant network + microphone permissions.
+Sideload `dist/` via EvenHub developer mode → Install from file. Grant network + microphone permissions.
 
 **2. Configure credentials**
 
@@ -50,7 +50,7 @@ Set a Whisper URL (e.g. `http://yourserver:8000`) in settings and tap **Save**. 
 **3. Load on device via QR code**
 
 ```bash
-cd plugin && npm run dev
+npm run dev
 # in another terminal:
 evenhub qr --url "http://192.168.1.x:5173"
 ```
@@ -60,7 +60,7 @@ Scan the QR code in the Even app. Replace `192.168.1.x` with your machine's LAN 
 **4. Package for release**
 
 ```bash
-cd plugin && npm run package
+npm run package
 ```
 
 See the [EvenHub packaging reference](https://hub.evenrealities.com/docs/reference/packaging) for signing and submission details.
@@ -68,7 +68,7 @@ See the [EvenHub packaging reference](https://hub.evenrealities.com/docs/referen
 **5. Develop with the simulator**
 
 ```bash
-cd plugin && npm run dev
+npm run dev
 # in another terminal:
 evenhub-simulator http://localhost:5173
 ```
@@ -76,7 +76,7 @@ evenhub-simulator http://localhost:5173
 ## Running tests
 
 ```bash
-cd plugin && npm test
+npm test
 ```
 
 ## License
