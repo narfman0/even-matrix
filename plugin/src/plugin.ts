@@ -121,6 +121,7 @@ export function createPlugin(
   let seenEventIds: Set<string> = new Set()
   let scrollOffset = 0
   let listeningStartedAt = 0
+  let navSeq = 0
 
   function pushError(msg: string, data?: any) {
     const entry = data !== undefined
@@ -329,10 +330,13 @@ export function createPlugin(
         const item = displayedRooms[index]
         if (item && !item.isHeader) {
           log('info', 'room selected', { id: item.id, name: item.name })
+          const seq = ++navSeq
           selectedRoomId = item.id
           await showLoadingView(item.name)
+          if (seq !== navSeq) return
           try {
             const history = await matrix.fetchHistory(item.id, 50)
+            if (seq !== navSeq) return
             seenEventIds = new Set(history.map((m: MatrixMessage) => m.event_id).filter(Boolean))
             await showMessageView(history.map((m: MatrixMessage) => `${m.sender}: ${m.text}`))
           } catch (err) {
