@@ -5,7 +5,7 @@
     TextContainerProperty,
     CreateStartUpPageContainer,
   } from '@evenrealities/even_hub_sdk'
-  import { createPlugin } from './plugin'
+  import { createPlugin, pcmToWav } from './plugin'
   import { MatrixRestClient } from './matrix-client'
   import appJson from '../app.json'
 
@@ -21,6 +21,7 @@
     selectedRoomId: null,
     lines: [],
     view: 'rooms',
+    loadingRoomName: '',
     recognizing: false,
     scrollOffset: 0,
     matrixConnected: false,
@@ -32,11 +33,11 @@
   let userValue = $state('')
   let passValue = $state('')
   let whisperValue = $state('')
+  let whisperModel = $state('Systran/faster-distil-whisper-small.en')
   let saveStatus = $state('')
   let saveColor = $state('#888')
   let msgInput = $state('')
 
-  let loadingRoomId = $state<string | null>(null)
   let plugin: Plugin | null = null
   let bridge: any = null
 
@@ -83,9 +84,7 @@
   }
 
   async function selectRoom(index: number, id: string) {
-    loadingRoomId = id
     await plugin?.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: index } })
-    loadingRoomId = null
   }
 
   async function sendText() {
@@ -97,6 +96,7 @@
   async function saveWhisper() {
     try {
       await bridge.setLocalStorage('even_matrix_whisper_url', whisperValue.trim())
+      await bridge.setLocalStorage('even_matrix_whisper_model', whisperModel.trim())
       saveStatus = 'Saved. Reloading...'
       saveColor = '#4caf50'
       setTimeout(() => window.location.reload(), 800)
@@ -112,11 +112,18 @@
     saveStatus = 'Testing...'
     saveColor = '#888'
     try {
-      const res = await fetch(`${url}/`, { signal: AbortSignal.timeout(5000) })
-      saveStatus = `Reachable (HTTP ${res.status}) ✓`
+      const silence = new Uint8Array(16000 * 2)
+      const wav = pcmToWav(silence, 16000)
+      const form = new FormData()
+      form.append('file', new Blob([wav], { type: 'audio/wav' }), 'test.wav')
+      form.append('model', whisperModel.trim())
+      const res = await fetch(`${url}/v1/audio/transcriptions`, { method: 'POST', body: form, signal: AbortSignal.timeout(10000) })
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+      const json = await res.json() as { text?: string }
+      saveStatus = 'OK ✓'
       saveColor = '#4caf50'
     } catch (e) {
-      saveStatus = `Unreachable: ${e}`
+      saveStatus = `Whisper test failed: ${e}`
       saveColor = '#f44336'
     }
   }
@@ -141,12 +148,14 @@
     const userId        = await bridge.getLocalStorage('even_matrix_user_id').catch(() => '')
     const syncToken     = await bridge.getLocalStorage('even_matrix_sync_token').catch(() => null)
     const whisperUrl    = await bridge.getLocalStorage('even_matrix_whisper_url').catch(() => null)
+    const whisperMdl    = await bridge.getLocalStorage('even_matrix_whisper_model').catch(() => null)
     const savedUser     = await bridge.getLocalStorage('even_matrix_username').catch(() => '')
     const savedRoomId   = await bridge.getLocalStorage('even_matrix_selected_room').catch(() => null)
 
     hsValue = homeserver
     userValue = savedUser
     whisperValue = whisperUrl ?? ''
+    if (whisperMdl) whisperModel = whisperMdl
 
     if (!homeserver || !accessToken) {
       settingsOpen = true
@@ -154,7 +163,7 @@
     }
 
     const matrix = new MatrixRestClient(homeserver, accessToken, userId)
-    plugin = createPlugin(bridge, matrix, whisperUrl || null, () => {
+    plugin = createPlugin(bridge, matrix, whisperUrl || null, whisperModel, () => {
       state = plugin!.getState()
       const s = plugin!.getState()
       if (s.syncToken) bridge.setLocalStorage('even_matrix_sync_token', s.syncToken)
@@ -167,16 +176,13 @@
 </script>
 
 <div id="status-bar">
-  <span class="matrix-status" class:connected={state.matrixConnected} class:disconnected={!state.matrixConnected}>
-    {state.matrixConnected ? 'Matrix: connected' : 'Matrix: disconnected'}
-  </span>
   <span id="view-label">{settingsOpen ? 'settings' : state.view}</span>
   <button id="settings-btn" title="Settings" onclick={() => (settingsOpen = !settingsOpen)}>
     {settingsOpen ? '✕' : '⚙'}
   </button>
 </div>
 
-{#if !settingsOpen && (state.view === 'messages' || state.view === 'listening')}
+{#if !settingsOpen && (state.view === 'messages' || state.view === 'listening' || state.view === 'loading')}
   <div id="controls">
     {#if state.view === 'messages'}
       <button class="ctrl-btn" onclick={() => plugin?.handleEvenHubEvent({ sysEvent: {} })}>Back</button>
@@ -185,6 +191,8 @@
         onkeydown={(e) => e.key === 'Enter' && sendText()} />
       <button class="ctrl-btn primary" onclick={sendText}>Send</button>
       <button class="ctrl-btn" onclick={() => plugin?.startAudio()}>🎤</button>
+    {:else if state.view === 'loading'}
+      <button class="ctrl-btn" onclick={() => plugin?.showRoomList()}>Back</button>
     {:else}
       <button class="ctrl-btn danger" onclick={() => plugin?.stopAudio()}>Stop</button>
     {/if}
@@ -217,6 +225,10 @@
       <button class="save-btn" onclick={testWhisper}>Test</button>
       <button class="save-btn" onclick={saveWhisper}>Save</button>
     </div>
+    <div class="settings-row">
+      <label class="settings-label" for="whisper-model-input">Whisper Model</label>
+      <input id="whisper-model-input" type="text" placeholder="Systran/faster-distil-whisper-small.en" bind:value={whisperModel} />
+    </div>
     <div id="save-status" style="color: {saveColor}">{saveStatus}</div>
     <div id="error-log">
       <h3>ERRORS</h3>
@@ -245,13 +257,15 @@
               onclick={() => selectRoom(index, item.id)}
             >
               {item.name}
-              {#if loadingRoomId === item.id}
-                <span class="room-spinner">↻</span>
-              {/if}
             </div>
           {/if}
         {/each}
       {/if}
+    {:else if state.view === 'loading'}
+      <div class="loading-indicator">
+        <div class="spinner">↻</div>
+        Loading {state.loadingRoomName}...
+      </div>
     {:else if state.view === 'listening'}
       <div class="listening-indicator">
         <div class="pulse"></div>Listening...
@@ -287,9 +301,6 @@
     padding: 6px 12px; background: #222; border-bottom: 1px solid #333;
     position: sticky; top: 0; z-index: 10;
   }
-  .matrix-status { font-size: 12px; }
-  .matrix-status.connected { color: #4caf50; }
-  .matrix-status.disconnected { color: #f44336; }
   #view-label { font-size: 12px; color: #888; }
   #settings-btn {
     background: none; border: none; color: #888; font-size: 16px;
@@ -309,16 +320,19 @@
     border-bottom: 1px solid #333; margin-top: 8px; cursor: default;
   }
   .no-rooms { color: #555; padding: 8px; }
-  .room-spinner {
-    display: inline-block; margin-left: 6px; font-size: 13px; color: #888;
-    animation: spin 0.7s linear infinite;
-  }
   @keyframes spin { to { transform: rotate(360deg); } }
   .messages { white-space: pre-wrap; }
   .msg-line { line-height: 1.5; }
   .msg-sender { font-weight: bold; }
   .msg-text { color: #ccc; }
   .no-msg { color: #555; }
+  .loading-indicator {
+    display: flex; align-items: center; gap: 8px;
+    padding: 16px; color: #888; font-size: 16px;
+  }
+  .spinner {
+    display: inline-block; animation: spin 0.7s linear infinite; font-size: 20px;
+  }
   .listening-indicator {
     display: flex; align-items: center; gap: 8px;
     padding: 16px; color: #4caf50; font-size: 16px;
@@ -361,12 +375,12 @@
   }
   .settings-label { font-size: 12px; color: #888; min-width: 80px; }
   .settings-value { font-size: 12px; color: #ccc; }
-  #hs-input, #user-input, #pass-input, #whisper-input {
+  #hs-input, #user-input, #pass-input, #whisper-input, #whisper-model-input {
     flex: 1; background: #1e1e1e; border: 1px solid #444; color: #eee;
     font-family: monospace; font-size: 12px; padding: 4px 8px;
     border-radius: 4px; outline: none;
   }
-  #hs-input:focus, #user-input:focus, #pass-input:focus, #whisper-input:focus { border-color: #666; }
+  #hs-input:focus, #user-input:focus, #pass-input:focus, #whisper-input:focus, #whisper-model-input:focus { border-color: #666; }
   .save-btn {
     padding: 4px 10px; border-radius: 4px; border: 1px solid #4caf50;
     background: #1a2e1a; color: #4caf50; font-family: monospace; font-size: 12px;

@@ -71,7 +71,7 @@ function mergeChunks(chunks: Uint8Array[]): Uint8Array {
   return merged
 }
 
-function pcmToWav(pcm: Uint8Array, sampleRate: number): Uint8Array {
+export function pcmToWav(pcm: Uint8Array, sampleRate: number): Uint8Array {
   const numChannels = 1
   const bitsPerSample = 16
   const byteRate = (sampleRate * numChannels * bitsPerSample) / 8
@@ -103,13 +103,15 @@ export function createPlugin(
   bridge: Bridge,
   matrix: MatrixClient,
   whisperUrl: string | null = null,
+  whisperModel: string = 'Systran/faster-distil-whisper-small.en',
   onUpdate?: () => void
 ) {
   let hierarchy: RoomHierarchy = { dms: [], spaces: [], orphans: [] }
   let displayedRooms: DisplayItem[] = []
   let selectedRoomId: string | null = null
   let lines: string[] = []
-  let view: 'rooms' | 'messages' | 'listening' = 'rooms'
+  let view: 'rooms' | 'messages' | 'listening' | 'loading' = 'rooms'
+  let loadingRoomName: string = ''
   let recognizing = false
   let matrixConnected = false
   let syncToken: string | null = null
@@ -173,6 +175,28 @@ export function createPlugin(
     } catch (err) {
       log('error', 'rebuildPageContainer (listening) failed', err)
       pushError('rebuildPageContainer (listening) failed', String(err))
+    }
+  }
+
+  async function showLoadingView(roomName: string) {
+    log('info', 'showLoadingView', { roomName })
+    loadingRoomName = roomName
+    view = 'loading'
+    onUpdate?.()
+    try {
+      await bridge.rebuildPageContainer(new RebuildPageContainer({
+        containerTotalNum: 1,
+        textObject: [new TextContainerProperty({
+          xPosition: 0, yPosition: 0, width: 576, height: 288,
+          borderWidth: 0, paddingLength: 4,
+          containerID: CONTAINER_ID, containerName: 'loading',
+          content: `Loading ${roomName}...`,
+          isEventCapture: 1,
+        })],
+      }))
+    } catch (err) {
+      log('error', 'rebuildPageContainer (loading) failed', err)
+      pushError('rebuildPageContainer (loading) failed', String(err))
     }
   }
 
@@ -245,7 +269,7 @@ export function createPlugin(
       const wav = pcmToWav(pcm, 16000)
       const form = new FormData()
       form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav')
-      form.append('model', 'Systran/faster-whisper-small')
+      form.append('model', whisperModel)
       const res = await fetch(`${whisperUrl}/v1/audio/transcriptions`, { method: 'POST', body: form })
       if (!res.ok) throw new Error(`whisper: ${res.status}`)
       const { text } = await res.json() as { text?: string }
@@ -305,27 +329,7 @@ export function createPlugin(
         if (item && !item.isHeader) {
           log('info', 'room selected', { id: item.id, name: item.name })
           selectedRoomId = item.id
-          const loadingNames = displayedRooms.map((r, i) =>
-            i === index ? `${r.name.slice(0, 60)}...` : r.name.slice(0, 64)
-          )
-          try {
-            await bridge.rebuildPageContainer(new RebuildPageContainer({
-              containerTotalNum: 1,
-              listObject: [new ListContainerProperty({
-                xPosition: 0, yPosition: 0, width: 576, height: 288,
-                borderWidth: 0, paddingLength: 4,
-                containerID: CONTAINER_ID, containerName: 'rooms',
-                itemContainer: new ListItemContainerProperty({
-                  itemCount: loadingNames.length,
-                  itemName: loadingNames,
-                  isItemSelectBorderEn: 1,
-                }),
-                isEventCapture: 1,
-              })],
-            }))
-          } catch (err) {
-            log('error', 'rebuildPageContainer (loading indicator) failed', err)
-          }
+          await showLoadingView(item.name)
           try {
             const history = await matrix.fetchHistory(item.id, 50)
             seenEventIds = new Set(history.map((m: MatrixMessage) => m.event_id).filter(Boolean))
@@ -346,6 +350,8 @@ export function createPlugin(
       log('info', 'sysEvent', { eventType: et, view, msSinceListeningStart: Date.now() - listeningStartedAt })
       if (view === 'listening' && Date.now() - listeningStartedAt > 1000) {
         await stopAudio()
+      } else if (view === 'loading') {
+        await showRoomList()
       } else if (view === 'messages') {
         if (et === OsEventTypeList.DOUBLE_CLICK_EVENT) {
           await startAudio()
@@ -397,7 +403,7 @@ export function createPlugin(
   }
 
   function getState() {
-    return { hierarchy, displayedRooms, selectedRoomId, lines, view, recognizing, scrollOffset, matrixConnected, errors, syncToken }
+    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, recognizing, scrollOffset, matrixConnected, errors, syncToken }
   }
 
   return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage, navigateToRoom }
