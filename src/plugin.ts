@@ -620,6 +620,10 @@ export function createPlugin(
     if (loadingMore) return
     loadingMore = true
     try {
+      await bridge.textContainerUpgrade(new TextContainerUpgrade({
+        containerID: CONTAINER_ID,
+        content: 'Loading older messages...',
+      }))
       const result = await matrix.fetchHistory(selectedRoomId, 50, prevBatch)
       const newLines = result.messages.map((m: MatrixMessage) => `[${formatAge(m.ts * 1000)}] ${m.sender}: ${m.text}`)
       result.messages.forEach(m => { if (m.event_id) seenEventIds.add(m.event_id) })
@@ -631,6 +635,14 @@ export function createPlugin(
     } finally {
       loadingMore = false
       onUpdate?.()
+      try {
+        await bridge.textContainerUpgrade(new TextContainerUpgrade({
+          containerID: CONTAINER_ID,
+          content: buildContent(lines, scrollOffset),
+        }))
+      } catch (err) {
+        log('error', 'textContainerUpgrade (loadMore restore) failed', err)
+      }
     }
   }
 

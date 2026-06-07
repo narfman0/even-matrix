@@ -299,6 +299,24 @@ describe('loadMoreHistory', () => {
     expect(prevBatch).toBeNull()
   })
 
+  it('shows "Loading older messages..." on glasses when loadMoreHistory fires', async () => {
+    const { bridge, plugin, matrix } = makePlugin()
+    await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [{ event_id: 'ev1', sender: 'A', text: 'msg', ts: 0 }],
+      prevBatch: 'tok_load',
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    bridge.textContainerUpgrade.mockClear()
+
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
+    await plugin.loadMoreHistory()
+
+    const calls = bridge.textContainerUpgrade.mock.calls
+    const loadingCall = calls.find((c: any) => c[0].content === 'Loading older messages...')
+    expect(loadingCall).toBeDefined()
+  })
+
   it('does nothing when prevBatch is null', async () => {
     const { plugin, matrix } = makePlugin()
     await goToMessages(matrix, plugin)
