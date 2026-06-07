@@ -574,7 +574,8 @@ export function createPlugin(
             log('info', 'back gesture (no eventType) → showRoomList')
             await showRoomList()
           } else {
-            log('info', 'back gesture ignored — within nav cooldown')
+            log('warn', 'back gesture ignored — within nav cooldown')
+            onUpdate?.()
           }
         } else {
           log('warn', 'unhandled sysEvent in messages view', { eventType: et })
