@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
+    "package": "npm run build && evenhub pack app.json dist",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -12,11 +13,13 @@
     "@evenrealities/even_hub_sdk": "latest"
   },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^4.0.4",
     "@types/node": "^25.9.1",
+    "@vitest/coverage-v8": "^2.0.0",
+    "jsdom": "^25.0.0",
+    "svelte": "^5.56.2",
     "typescript": "^5",
     "vite": "^5",
-    "vitest": "^2.0.0",
-    "@vitest/coverage-v8": "^2.0.0",
-    "jsdom": "^25.0.0"
+    "vitest": "^2.0.0"
   }
 }

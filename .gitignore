@@ -1,7 +1,5 @@
-/target
-config.toml
-plugin/node_modules
-plugin/dist
+node_modules
+dist
+*.ehpk
 *.log
-plugin/*.ehpk
-models/*
+target/
