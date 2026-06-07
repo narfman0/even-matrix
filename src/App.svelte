@@ -272,7 +272,7 @@
       </div>
     {:else if state.view === 'listening'}
       <div class="listening-indicator">
-        <div class="pulse"></div>Listening...
+        <div class="pulse"></div>{state.transcribedText || 'Listening...'}
       </div>
     {:else if state.view === 'transcribing'}
       <div class="transcribing-indicator">
