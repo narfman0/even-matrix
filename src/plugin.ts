@@ -599,6 +599,7 @@ export function createPlugin(
     const now = Date.now()
     if (text.trim() === lastSentText && now - lastSentAt < SEND_DEDUP_MS) {
       log('info', 'sendMessage duplicate suppressed', { text: text.trim() })
+      pushError('Message suppressed (sent too recently)')
       return
     }
     lastSentText = text.trim()
