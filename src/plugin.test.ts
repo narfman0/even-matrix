@@ -480,6 +480,38 @@ describe('handleEvenHubEvent', () => {
     await plugin.stopAudio()
     expect(plugin.getState().view).toBe('messages')
   })
+
+  it('audio buffer cap: chunks beyond 10 MB are dropped and WAV payload stays within limit', async () => {
+    const AUDIO_MAX_BYTES = 10 * 1024 * 1024
+    const WAV_HEADER = 44
+    const whisperUrl = 'http://whisper'
+    const { plugin, matrix } = makePlugin(whisperUrl)
+    await goToMessages(matrix, plugin)
+
+    // Mock fetch to capture the FormData body size
+    let capturedWavSize = -1
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, opts: any) => {
+      if (opts?.body instanceof FormData) {
+        const file: File = (opts.body as FormData).get('file') as File
+        if (file) capturedWavSize = file.size
+      }
+      return { ok: true, headers: { get: () => null }, json: async () => ({ text: '' }) }
+    }))
+
+    await plugin.startAudio()
+
+    // Send a chunk just under the cap, then another that would push past it
+    const bigChunk = new Uint8Array(AUDIO_MAX_BYTES - 10)
+    const overflowChunk = new Uint8Array(100)
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: bigChunk } })
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: overflowChunk } })
+
+    await plugin.stopAudio()
+
+    // WAV = 44 header + PCM bytes; total PCM must not exceed AUDIO_MAX_BYTES
+    expect(capturedWavSize).toBeGreaterThan(0)
+    expect(capturedWavSize).toBeLessThanOrEqual(AUDIO_MAX_BYTES + WAV_HEADER)
+  })
 })
 
 // ─── startAudio / stopAudio ───────────────────────────────────────────────────

@@ -20,6 +20,7 @@ const DISPLAY_MAX_BYTES = 999
 const SCROLL_STEP = 3
 const ROLLING_INTERVAL_MS = 3000
 const ROLLING_MIN_BYTES = 32000
+const AUDIO_MAX_BYTES = 10 * 1024 * 1024
 const enc = new TextEncoder()
 
 type DisplayItem = RoomInfo & { isHeader: boolean }
@@ -483,7 +484,13 @@ export function createPlugin(
     if (event.audioEvent && recognizing) {
       const pcm = event.audioEvent.audioPcm
       log('info', 'audioEvent', { type: typeof pcm, byteLength: pcm?.byteLength ?? pcm?.length })
-      audioBuf.push(pcm instanceof Uint8Array ? pcm : new Uint8Array(pcm))
+      const chunk = pcm instanceof Uint8Array ? pcm : new Uint8Array(pcm)
+      const currentBytes = audioBuf.reduce((n, c) => n + c.length, 0)
+      if (currentBytes + chunk.length <= AUDIO_MAX_BYTES) {
+        audioBuf.push(chunk)
+      } else {
+        log('warn', 'audio buffer cap reached, dropping chunk')
+      }
     }
     if (event.listEvent) {
       const et = event.listEvent.eventType
