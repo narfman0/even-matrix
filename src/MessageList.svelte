@@ -11,6 +11,7 @@
       {@const parsed = parseLine(line)}
       <div class="msg-line">
         {#if parsed}
+          {#if parsed.timestamp}<span class="msg-ts">[{parsed.timestamp}]</span>{/if}
           <span class="msg-sender" style="color: {senderColor(parsed.sender)}">{parsed.sender}:</span>
           <span class="msg-text"> {parsed.text}</span>
         {:else}
@@ -24,6 +25,7 @@
 <style>
   .messages { white-space: pre-wrap; }
   .msg-line { line-height: 1.5; }
+  .msg-ts { color: #555; font-size: 11px; margin-right: 4px; }
   .msg-sender { font-weight: bold; }
   .msg-text { color: #ccc; }
   .no-msg { color: #555; }

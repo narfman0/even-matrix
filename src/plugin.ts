@@ -7,6 +7,7 @@ import {
   OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
 import type { MatrixClient, MatrixMessage, RoomHierarchy, RoomInfo, SpaceInfo } from './matrix-client'
+import { formatAge } from './message-utils'
 
 const CONTAINER_ID = 1
 
@@ -326,10 +327,11 @@ export function createPlugin(
     }
   }
 
-  async function onSyncMessage(roomId: string, eventId: string, sender: string, text: string) {
+  async function onSyncMessage(roomId: string, eventId: string, sender: string, text: string, ts?: number) {
     if (eventId && seenEventIds.has(eventId)) return
     if (eventId) seenEventIds.add(eventId)
-    if (roomId === selectedRoomId) await appendLine(`${sender}: ${text}`)
+    const age = ts != null ? formatAge(ts) : formatAge(Date.now())
+    if (roomId === selectedRoomId) await appendLine(`[${age}] ${sender}: ${text}`)
   }
 
   async function start(token: string | null) {
@@ -516,7 +518,7 @@ export function createPlugin(
             navAbort = null
             seenEventIds = new Set(result.messages.map((m: MatrixMessage) => m.event_id).filter(Boolean))
             prevBatch = result.prevBatch
-            await showMessageView(result.messages.map((m: MatrixMessage) => `${m.sender}: ${m.text}`))
+            await showMessageView(result.messages.map((m: MatrixMessage) => `[${formatAge(m.ts * 1000)}] ${m.sender}: ${m.text}`))
           } catch (err) {
             if ((err as any)?.name === 'AbortError') return
             log('error', 'fetchHistory failed', err)
@@ -619,7 +621,7 @@ export function createPlugin(
     loadingMore = true
     try {
       const result = await matrix.fetchHistory(selectedRoomId, 50, prevBatch)
-      const newLines = result.messages.map((m: MatrixMessage) => `${m.sender}: ${m.text}`)
+      const newLines = result.messages.map((m: MatrixMessage) => `[${formatAge(m.ts * 1000)}] ${m.sender}: ${m.text}`)
       result.messages.forEach(m => { if (m.event_id) seenEventIds.add(m.event_id) })
       lines = [...newLines, ...lines]
       prevBatch = result.prevBatch

@@ -1,5 +1,37 @@
-import { describe, it, expect } from 'vitest'
-import { senderColor, parseLine, visibleLines, SENDER_COLORS, DISPLAY_MAX_LINES } from './message-utils'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { senderColor, parseLine, visibleLines, formatAge, SENDER_COLORS, DISPLAY_MAX_LINES } from './message-utils'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+// ─── formatAge ────────────────────────────────────────────────────────────────
+
+describe('formatAge', () => {
+  it('returns "just now" when age is less than 60 seconds', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000000)
+    expect(formatAge(1000000 - 30 * 1000)).toBe('just now')
+  })
+
+  it('returns "Xm" when age is between 1 and 59 minutes', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000000)
+    expect(formatAge(1000000 - 5 * 60 * 1000)).toBe('5m')
+  })
+
+  it('returns "Xh" when age is between 1 and 23 hours', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000000)
+    expect(formatAge(1000000 - 3 * 60 * 60 * 1000)).toBe('3h')
+  })
+
+  it('returns "Xd" when age is 24 hours or more', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000000)
+    expect(formatAge(1000000 - 2 * 24 * 60 * 60 * 1000)).toBe('2d')
+  })
+})
 
 // ─── senderColor ──────────────────────────────────────────────────────────────
 
@@ -84,6 +116,24 @@ describe('parseLine', () => {
     const longSender = 'a'.repeat(200)
     const result = parseLine(`${longSender}: message`)
     expect(result).toEqual({ sender: longSender, text: 'message' })
+  })
+
+  it('parses timestamp prefix "[Xm] sender: text"', () => {
+    expect(parseLine('[5m] alice: hello')).toEqual({ timestamp: '5m', sender: 'alice', text: 'hello' })
+  })
+
+  it('parses "[just now] sender: text"', () => {
+    expect(parseLine('[just now] alice: hi there')).toEqual({ timestamp: 'just now', sender: 'alice', text: 'hi there' })
+  })
+
+  it('parses "[2h] sender: text with colons"', () => {
+    expect(parseLine('[2h] bob: say: something')).toEqual({ timestamp: '2h', sender: 'bob', text: 'say: something' })
+  })
+
+  it('returns no timestamp field for plain "sender: text" line', () => {
+    const result = parseLine('alice: hello')
+    expect(result).toEqual({ sender: 'alice', text: 'hello' })
+    expect(result?.timestamp).toBeUndefined()
   })
 })
 

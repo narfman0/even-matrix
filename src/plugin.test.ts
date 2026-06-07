@@ -99,8 +99,8 @@ describe('showMessageView', () => {
     const arg = bridge.rebuildPageContainer.mock.calls.at(-1)![0]
     const lines = arg.textObject[0].content.split('\n')
     expect(lines).toHaveLength(10)
-    expect(lines[0]).toBe('A: msg9')
-    expect(lines[9]).toBe('A: msg0')
+    expect(lines[0]).toContain('A: msg9')
+    expect(lines[9]).toContain('A: msg0')
   })
 
   it('drops oldest messages when byte budget is exceeded', async () => {
@@ -111,7 +111,7 @@ describe('showMessageView', () => {
     const arg = bridge.rebuildPageContainer.mock.calls.at(-1)![0]
     const content = arg.textObject[0].content
     expect(content.length).toBeLessThanOrEqual(999)
-    expect(content.startsWith(`A: 7:${longMsg}`)).toBe(true)
+    expect(content).toContain(`A: 7:${longMsg}`)
   })
 
   it('shows truncated message instead of "(no messages)" when single message exceeds budget', async () => {
@@ -122,7 +122,7 @@ describe('showMessageView', () => {
     const content = arg.textObject[0].content
     expect(content).not.toBe('(no messages)')
     expect(content.length).toBeLessThanOrEqual(999)
-    expect(content.startsWith('A: ')).toBe(true)
+    expect(content).toContain('A: ')
   })
 
   it('shows fallback when no messages', async () => {
@@ -171,7 +171,7 @@ describe('appendLine', () => {
     await plugin.appendLine(`new:${longMsg}`)
     const arg = bridge.textContainerUpgrade.mock.calls[0][0]
     expect(arg.content.length).toBeLessThanOrEqual(999)
-    expect(arg.content.startsWith(`new:${longMsg}`)).toBe(true)
+    expect(arg.content).toContain(`new:${longMsg}`)
   })
 })
 
@@ -261,7 +261,7 @@ describe('room selection', () => {
     await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
     expect(matrix.fetchHistory).toHaveBeenCalledWith('r1', 50, null, expect.any(AbortSignal))
     const arg = bridge.rebuildPageContainer.mock.calls.at(-1)![0]
-    expect(arg.textObject[0].content).toBe('Alice: Hi')
+    expect(arg.textObject[0].content).toContain('Alice: Hi')
   })
 
   it('sets selectedRoomId', async () => {
@@ -294,8 +294,8 @@ describe('loadMoreHistory', () => {
     await plugin.loadMoreHistory()
     expect(matrix.fetchHistory).toHaveBeenLastCalledWith('r1', 50, 'tok_abc')
     const { lines, prevBatch } = plugin.getState()
-    expect(lines[0]).toBe('A: older')
-    expect(lines[1]).toBe('B: newer')
+    expect(lines[0]).toContain('A: older')
+    expect(lines[1]).toContain('B: newer')
     expect(prevBatch).toBeNull()
   })
 
@@ -442,8 +442,8 @@ describe('handleEvenHubEvent', () => {
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
     expect(plugin.getState().scrollOffset).toBe(3)
     const content = bridge.textContainerUpgrade.mock.calls[0][0].content
-    expect(content).toContain('A: msg0')
-    expect(content).not.toContain('A: msg9')
+    expect(content).toContain('msg0')
+    expect(content).not.toContain('msg9')
   })
 
   it('scroll up returns to latest messages', async () => {
@@ -455,7 +455,7 @@ describe('handleEvenHubEvent', () => {
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_TOP' } })
     expect(plugin.getState().scrollOffset).toBe(0)
     const content = bridge.textContainerUpgrade.mock.calls[0][0].content
-    expect(content).toContain('A: msg9')
+    expect(content).toContain('msg9')
   })
 
   it('scroll offset does not go below zero', async () => {
