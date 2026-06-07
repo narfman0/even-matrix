@@ -55,9 +55,12 @@
   }
 
   async function saveWhisper() {
+    const url = whisperValue.trim()
+    const model = whisperModel.trim()
+    if (!model) { saveStatus = 'Whisper model cannot be empty.'; saveColor = '#f44336'; return }
     try {
-      await bridge.setLocalStorage(STORAGE_WHISPER_URL, whisperValue.trim())
-      await bridge.setLocalStorage(STORAGE_WHISPER_MODEL, whisperModel.trim())
+      await bridge.setLocalStorage(STORAGE_WHISPER_URL, url)
+      await bridge.setLocalStorage(STORAGE_WHISPER_MODEL, model)
       saveStatus = 'Saved. Reloading...'
       saveColor = '#4caf50'
       setTimeout(() => window.location.reload(), 800)
