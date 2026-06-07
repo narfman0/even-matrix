@@ -41,6 +41,7 @@
     errors: [],
     syncToken: null,
     prevBatch: null,
+    loadingMore: false,
   })
   let settingsOpen = $state(false)
   let msgInput = $state('')
@@ -191,7 +192,9 @@
     {:else}
       <MessageList lines={state.lines} scrollOffset={state.scrollOffset} />
       {#if state.prevBatch !== null}
-        <button class="load-more-btn" onclick={loadMore}>Load more</button>
+        <button class="load-more-btn" onclick={loadMore} disabled={state.loadingMore}>
+          {state.loadingMore ? 'Loading...' : 'Load more'}
+        </button>
       {/if}
     {/if}
   </div>

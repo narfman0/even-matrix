@@ -140,6 +140,7 @@ export function createPlugin(
   let seenEventIds: Set<string> = new Set()
   let scrollOffset = 0
   let prevBatch: string | null = null
+  let loadingMore = false
   let listeningStartedAt = 0
   let navSeq = 0
   let roomNavStartedAt = 0
@@ -612,21 +613,25 @@ export function createPlugin(
 
   async function loadMoreHistory() {
     if (!selectedRoomId || !prevBatch) return
+    if (loadingMore) return
+    loadingMore = true
     try {
       const result = await matrix.fetchHistory(selectedRoomId, 50, prevBatch)
       const newLines = result.messages.map((m: MatrixMessage) => `${m.sender}: ${m.text}`)
       result.messages.forEach(m => { if (m.event_id) seenEventIds.add(m.event_id) })
       lines = [...newLines, ...lines]
       prevBatch = result.prevBatch
-      onUpdate?.()
     } catch (err) {
       log('error', 'loadMoreHistory failed', err)
       pushError('loadMoreHistory failed', String(err))
+    } finally {
+      loadingMore = false
+      onUpdate?.()
     }
   }
 
   function getState() {
-    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken, prevBatch }
+    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken, prevBatch, loadingMore }
   }
 
   return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage, navigateToRoom, loadMoreHistory }

@@ -306,6 +306,32 @@ describe('loadMoreHistory', () => {
     await plugin.loadMoreHistory()
     expect(matrix.fetchHistory).not.toHaveBeenCalled()
   })
+
+  it('concurrent calls only fire one fetch (loadingMore guard)', async () => {
+    const { plugin, matrix } = makePlugin()
+    await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [{ event_id: 'ev1', sender: 'A', text: 'first', ts: 0 }],
+      prevBatch: 'tok_old',
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    expect(plugin.getState().prevBatch).toBe('tok_old')
+
+    // Set up a slow fetch that we can resolve manually
+    let resolveFetch!: (value: any) => void
+    const slowFetch = new Promise<any>(resolve => { resolveFetch = resolve })
+    matrix.fetchHistory.mockReturnValueOnce(slowFetch)
+
+    // Fire two concurrent loadMoreHistory calls
+    const p1 = plugin.loadMoreHistory()
+    const p2 = plugin.loadMoreHistory()
+
+    resolveFetch({ messages: [], prevBatch: null })
+    await Promise.all([p1, p2])
+
+    // fetchHistory should have only been called once (the second call was guarded)
+    expect(matrix.fetchHistory).toHaveBeenCalledTimes(2) // 1 from goToMessages + 1 from loadMoreHistory
+  })
 })
 
 // ─── EvenHub event handler ────────────────────────────────────────────────────
