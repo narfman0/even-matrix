@@ -7,12 +7,15 @@
     "build": "vite build",
     "package": "npm run build && evenhub pack app.json dist",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "simulate": "evenhub-simulator http://localhost:5173 --automation-port 9898"
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "latest"
   },
   "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.1.13",
+    "@evenrealities/evenhub-simulator": "^0.7.3",
     "@sveltejs/vite-plugin-svelte": "^4.0.4",
     "@types/node": "^25.9.1",
     "@vitest/coverage-v8": "^2.0.0",

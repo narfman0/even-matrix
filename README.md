@@ -70,7 +70,7 @@ See the [EvenHub packaging reference](https://hub.evenrealities.com/docs/referen
 ```bash
 npm run dev
 # in another terminal:
-evenhub-simulator http://localhost:5173
+npm run simulate
 ```
 
 ## Running tests
