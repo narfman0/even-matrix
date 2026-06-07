@@ -39,7 +39,11 @@ export class MatrixRestClient implements MatrixClient {
   }
 
   private async get<T>(path: string, signal?: AbortSignal): Promise<T> {
-    const res = await fetch(`${this.homeserver}${path}`, { headers: this.authHeaders(), signal })
+    const timeout = AbortSignal.timeout(30000)
+    const effectiveSignal = signal
+      ? (typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, timeout]) : signal)
+      : timeout
+    const res = await fetch(`${this.homeserver}${path}`, { headers: this.authHeaders(), signal: effectiveSignal })
     if (!res.ok) throw new Error(`GET ${path}: ${res.status}`)
     return res.json()
   }
