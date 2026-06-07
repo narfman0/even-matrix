@@ -42,6 +42,7 @@
     syncToken: null,
     prevBatch: null,
     loadingMore: false,
+    audioLevel: 0,
   })
   let settingsOpen = $state(false)
   let msgInput = $state('')
@@ -179,6 +180,9 @@
       <div class="listening-indicator">
         <div class="pulse"></div>{state.transcribedText || 'Listening...'}
       </div>
+      <div class="level-track">
+        <div class="level-bar" style="width: {Math.round(state.audioLevel * 100)}%"></div>
+      </div>
     {:else if state.view === 'transcribing'}
       <div class="transcribing-indicator">
         <div class="spinner">↻</div>
@@ -262,6 +266,15 @@
   }
   @keyframes pulse {
     0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+  }
+  .level-track {
+    height: 6px; background: #222; border-radius: 3px;
+    margin: 4px 12px; overflow: hidden;
+  }
+  .level-bar {
+    height: 100%; background: #4caf50; border-radius: 3px;
+    transition: width 0.1s ease;
+    max-width: 100%;
   }
   #controls {
     display: flex; justify-content: space-between; align-items: center;

@@ -138,6 +138,7 @@ export function createPlugin(
   let errors: string[] = []
 
   let audioBuf: Uint8Array[] = []
+  let audioLevel: number = 0
   let seenEventIds: Set<string> = new Set()
   let scrollOffset = 0
   let prevBatch: string | null = null
@@ -445,10 +446,21 @@ export function createPlugin(
     }, ROLLING_INTERVAL_MS)
   }
 
+  function computeRms(pcm: Uint8Array): number {
+    const samples = pcm.length / 2
+    let sum = 0
+    for (let i = 0; i < pcm.length; i += 2) {
+      const s = (pcm[i] | (pcm[i + 1] << 8)) << 16 >> 16  // signed 16-bit
+      sum += s * s
+    }
+    return Math.sqrt(sum / samples) / 32768
+  }
+
   async function stopAudio() {
     if (!recognizing) return
     log('info', 'stopAudio', { audioBufChunks: audioBuf.length })
     recognizing = false
+    audioLevel = 0
     if (rollingTimer !== null) { clearTimeout(rollingTimer); rollingTimer = null }
     rollingAbort?.abort(); rollingAbort = null
     const chunks = audioBuf
@@ -494,6 +506,8 @@ export function createPlugin(
       } else {
         log('warn', 'audio buffer cap reached, dropping chunk')
       }
+      audioLevel = computeRms(chunk)
+      onUpdate?.()
     }
     if (event.listEvent) {
       const et = event.listEvent.eventType
@@ -647,7 +661,7 @@ export function createPlugin(
   }
 
   function getState() {
-    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken, prevBatch, loadingMore }
+    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken, prevBatch, loadingMore, audioLevel }
   }
 
   return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage, navigateToRoom, loadMoreHistory }

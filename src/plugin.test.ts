@@ -538,6 +538,17 @@ describe('handleEvenHubEvent', () => {
     expect(plugin.getState().scrollOffset).toBe(0)
   })
 
+  it('audioEvent updates audioLevel to > 0 for non-silent PCM', async () => {
+    const { plugin, matrix } = makePlugin()
+    await goToMessages(matrix, plugin)
+    await plugin.startAudio()
+    // PCM: two bytes = one signed 16-bit sample at value 0x7FFF (max positive)
+    // little-endian: low byte = 0xFF, high byte = 0x7F
+    const pcm = new Uint8Array([0xFF, 0x7F])
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: pcm } })
+    expect(plugin.getState().audioLevel).toBeGreaterThan(0)
+  })
+
   it('audioEvent accumulates PCM chunks', async () => {
     const { plugin, matrix } = makePlugin()
     await goToMessages(matrix, plugin)
