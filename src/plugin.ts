@@ -541,6 +541,7 @@ export function createPlugin(
           } else {
             scrollOffset = Math.min(scrollOffset + SCROLL_STEP, Math.max(0, lines.length - 1))
           }
+          onUpdate?.()
           try {
             await bridge.textContainerUpgrade(new TextContainerUpgrade({
               containerID: CONTAINER_ID,
@@ -551,6 +552,7 @@ export function createPlugin(
           }
         } else if (et === OsEventTypeList.SCROLL_TOP_EVENT) {
           scrollOffset = Math.max(0, scrollOffset - SCROLL_STEP)
+          onUpdate?.()
           try {
             await bridge.textContainerUpgrade(new TextContainerUpgrade({
               containerID: CONTAINER_ID,
