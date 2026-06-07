@@ -544,7 +544,7 @@ export function createPlugin(
         if (et === OsEventTypeList.DOUBLE_CLICK_EVENT && whisperUrl) {
           await startAudio()
         } else if (et === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
-          if (scrollOffset >= lines.length - 1 && prevBatch) {
+          if (scrollOffset >= lines.length - SCROLL_STEP - 1 && prevBatch) {
             const prevCount = lines.length
             await loadMoreHistory()
             scrollOffset = Math.min(scrollOffset + (lines.length - prevCount), lines.length - 1)

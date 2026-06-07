@@ -307,6 +307,32 @@ describe('loadMoreHistory', () => {
     expect(matrix.fetchHistory).not.toHaveBeenCalled()
   })
 
+  it('prefetch: scroll triggers loadMoreHistory one page before end', async () => {
+    const { plugin, matrix } = makePlugin()
+    await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
+    // 5 messages, prevBatch set — with SCROLL_STEP=3, threshold = 5-3-1 = 1
+    // First scroll goes 0→3 (normal), second scroll: 3 >= 1 → triggers loadMoreHistory
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: Array.from({ length: 5 }, (_, i) => ({ event_id: `ev${i}`, sender: 'A', text: `m${i}`, ts: 0 })),
+      prevBatch: 'tok_prefetch',
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    expect(plugin.getState().prevBatch).toBe('tok_prefetch')
+
+    // First scroll: offset goes 0→3 (0 < threshold=1 is false so it scrolls normally)
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
+    expect(plugin.getState().scrollOffset).toBe(3)
+
+    // Set up load-more response
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
+
+    // Second scroll: scrollOffset=3 >= threshold=1, triggers loadMoreHistory
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'SCROLL_BOTTOM' } })
+
+    // fetchHistory: 1 for initial room load + 1 for prefetch loadMoreHistory
+    expect(matrix.fetchHistory).toHaveBeenCalledTimes(2)
+  })
+
   it('concurrent calls only fire one fetch (loadingMore guard)', async () => {
     const { plugin, matrix } = makePlugin()
     await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
