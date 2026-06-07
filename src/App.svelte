@@ -5,9 +5,11 @@
     TextContainerProperty,
     CreateStartUpPageContainer,
   } from '@evenrealities/even_hub_sdk'
-  import { createPlugin, pcmToWav } from './plugin'
+  import { createPlugin } from './plugin'
   import { MatrixRestClient } from './matrix-client'
   import appJson from '../app.json'
+  import MessageList from './MessageList.svelte'
+  import SettingsPanel from './SettingsPanel.svelte'
 
   const CONTAINER_ID = 1
   const APP_VERSION: string = appJson.version
@@ -31,57 +33,16 @@
     prevBatch: null,
   })
   let settingsOpen = $state(false)
-  let hsValue = $state('')
-  let userValue = $state('')
-  let passValue = $state('')
-  let whisperValue = $state('')
-  let whisperModel = $state('Systran/faster-distil-whisper-small.en')
-  let saveStatus = $state('')
-  let saveColor = $state('#888')
   let msgInput = $state('')
+
+  // Settings props for SettingsPanel
+  let settingsHomeserver = $state('')
+  let settingsUsername = $state('')
+  let settingsWhisperUrl = $state('')
+  let settingsWhisperModel = $state('Systran/faster-distil-whisper-small.en')
 
   let plugin: Plugin | null = null
   let bridge: any = null
-
-  function visibleLines(): string[] {
-    const { lines, scrollOffset } = state
-    return lines.slice(0, lines.length - scrollOffset).reverse()
-  }
-
-  const SENDER_COLORS = [
-    '#7eb8f7', '#f7c67e', '#b8f77e', '#f77eb8',
-    '#7ef7e8', '#c67ef7', '#f7f07e', '#f7907e',
-  ]
-
-  function senderColor(sender: string): string {
-    let hash = 0
-    for (let i = 0; i < sender.length; i++) hash = (hash * 31 + sender.charCodeAt(i)) >>> 0
-    return SENDER_COLORS[hash % SENDER_COLORS.length]
-  }
-
-  function parseLine(line: string): { sender: string; text: string } | null {
-    const colon = line.indexOf(': ')
-    if (colon === -1) return null
-    return { sender: line.slice(0, colon), text: line.slice(colon + 2) }
-  }
-
-  async function saveCredentials() {
-    try {
-      const result = await MatrixRestClient.login(hsValue.trim(), userValue.trim(), passValue)
-      await bridge.setLocalStorage('even_matrix_homeserver', hsValue.trim())
-      await bridge.setLocalStorage('even_matrix_username', userValue.trim())
-      await bridge.setLocalStorage('even_matrix_access_token', result.access_token)
-      await bridge.setLocalStorage('even_matrix_user_id', result.user_id)
-      await bridge.setLocalStorage('even_matrix_device_id', result.device_id)
-      passValue = ''
-      saveStatus = 'Logged in. Reloading...'
-      saveColor = '#4caf50'
-      setTimeout(() => window.location.reload(), 800)
-    } catch (e) {
-      saveStatus = `Login failed: ${e}`
-      saveColor = '#f44336'
-    }
-  }
 
   async function selectRoom(index: number, id: string) {
     await plugin?.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: index } })
@@ -95,41 +56,6 @@
 
   async function loadMore() {
     await plugin?.loadMoreHistory()
-  }
-
-  async function saveWhisper() {
-    try {
-      await bridge.setLocalStorage('even_matrix_whisper_url', whisperValue.trim())
-      await bridge.setLocalStorage('even_matrix_whisper_model', whisperModel.trim())
-      saveStatus = 'Saved. Reloading...'
-      saveColor = '#4caf50'
-      setTimeout(() => window.location.reload(), 800)
-    } catch {
-      saveStatus = 'Save failed.'
-      saveColor = '#f44336'
-    }
-  }
-
-  async function testWhisper() {
-    const url = whisperValue.trim()
-    if (!url) { saveStatus = 'Enter a Whisper URL first.'; saveColor = '#f44336'; return }
-    saveStatus = 'Testing...'
-    saveColor = '#888'
-    try {
-      const silence = new Uint8Array(16000 * 2)
-      const wav = pcmToWav(silence, 16000)
-      const form = new FormData()
-      form.append('file', new Blob([wav], { type: 'audio/wav' }), 'test.wav')
-      form.append('model', whisperModel.trim())
-      const res = await fetch(`${url}/v1/audio/transcriptions`, { method: 'POST', body: form, signal: AbortSignal.timeout(10000) })
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
-      const json = await res.json() as { text?: string }
-      saveStatus = 'OK ✓'
-      saveColor = '#4caf50'
-    } catch (e) {
-      saveStatus = `Whisper test failed: ${e}`
-      saveColor = '#f44336'
-    }
   }
 
   onMount(async () => {
@@ -156,10 +82,10 @@
     const savedUser     = await bridge.getLocalStorage('even_matrix_username').catch(() => '')
     const savedRoomId   = await bridge.getLocalStorage('even_matrix_selected_room').catch(() => null)
 
-    hsValue = homeserver
-    userValue = savedUser
-    whisperValue = whisperUrl ?? ''
-    if (whisperMdl) whisperModel = whisperMdl
+    settingsHomeserver = homeserver
+    settingsUsername = savedUser
+    settingsWhisperUrl = whisperUrl ?? ''
+    if (whisperMdl) settingsWhisperModel = whisperMdl
 
     if (!homeserver || !accessToken) {
       settingsOpen = true
@@ -167,7 +93,7 @@
     }
 
     const matrix = new MatrixRestClient(homeserver, accessToken, userId)
-    plugin = createPlugin(bridge, matrix, whisperUrl || null, whisperModel, () => {
+    plugin = createPlugin(bridge, matrix, whisperUrl || null, settingsWhisperModel, () => {
       state = plugin!.getState()
       const s = plugin!.getState()
       if (s.syncToken) bridge.setLocalStorage('even_matrix_sync_token', s.syncToken)
@@ -204,47 +130,15 @@
 {/if}
 
 {#if settingsOpen}
-  <div id="settings-panel">
-    <div class="settings-heading">Settings</div>
-    <div class="settings-row">
-      <span class="settings-label">Version</span>
-      <span class="settings-value">v{APP_VERSION}</span>
-    </div>
-    <div class="settings-row">
-      <label class="settings-label" for="hs-input">Homeserver</label>
-      <input id="hs-input" type="text" placeholder="https://matrix.example.com" bind:value={hsValue} />
-    </div>
-    <div class="settings-row">
-      <label class="settings-label" for="user-input">Username</label>
-      <input id="user-input" type="text" placeholder="alice" bind:value={userValue} />
-    </div>
-    <div class="settings-row">
-      <label class="settings-label" for="pass-input">Password</label>
-      <input id="pass-input" type="password" bind:value={passValue} />
-      <button class="save-btn" onclick={saveCredentials}>Login</button>
-    </div>
-    <div class="settings-row">
-      <label class="settings-label" for="whisper-input">Whisper URL</label>
-      <input id="whisper-input" type="text" placeholder="http://whisper-server:8080 (optional)" bind:value={whisperValue} />
-      <button class="save-btn" onclick={testWhisper}>Test</button>
-      <button class="save-btn" onclick={saveWhisper}>Save</button>
-    </div>
-    <div class="settings-row">
-      <label class="settings-label" for="whisper-model-input">Whisper Model</label>
-      <input id="whisper-model-input" type="text" placeholder="Systran/faster-distil-whisper-small.en" bind:value={whisperModel} />
-    </div>
-    <div id="save-status" style="color: {saveColor}">{saveStatus}</div>
-    <div id="error-log">
-      <h3>ERRORS</h3>
-      {#if state.errors.length === 0}
-        <div id="no-errors">none</div>
-      {:else}
-        {#each [...state.errors].reverse() as err}
-          <div class="error-entry">{err}</div>
-        {/each}
-      {/if}
-    </div>
-  </div>
+  <SettingsPanel
+    errors={state.errors}
+    {bridge}
+    homeserver={settingsHomeserver}
+    username={settingsUsername}
+    whisperUrl={settingsWhisperUrl}
+    whisperModel={settingsWhisperModel}
+    appVersion={APP_VERSION}
+  />
 {:else}
   <div id="content">
     {#if state.view === 'rooms'}
@@ -285,26 +179,10 @@
         Sending: {state.transcribedText}
       </div>
     {:else}
-      <div class="messages">
-        {#if visibleLines().length === 0}
-          <span class="no-msg">(no messages)</span>
-        {:else}
-          {#each visibleLines() as line}
-            {@const parsed = parseLine(line)}
-            <div class="msg-line">
-              {#if parsed}
-                <span class="msg-sender" style="color: {senderColor(parsed.sender)}">{parsed.sender}:</span>
-                <span class="msg-text"> {parsed.text}</span>
-              {:else}
-                {line}
-              {/if}
-            </div>
-          {/each}
-          {#if state.prevBatch !== null}
-            <button class="load-more-btn" onclick={loadMore}>Load more</button>
-          {/if}
-        {/if}
-      </div>
+      <MessageList lines={state.lines} scrollOffset={state.scrollOffset} />
+      {#if state.prevBatch !== null}
+        <button class="load-more-btn" onclick={loadMore}>Load more</button>
+      {/if}
     {/if}
   </div>
 {/if}
@@ -338,11 +216,6 @@
   }
   .no-rooms { color: #555; padding: 8px; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .messages { white-space: pre-wrap; }
-  .msg-line { line-height: 1.5; }
-  .msg-sender { font-weight: bold; }
-  .msg-text { color: #ccc; }
-  .no-msg { color: #555; }
   .load-more-btn {
     display: block; width: 100%; margin-top: 8px; padding: 6px;
     background: none; border: 1px solid #333; color: #666;
@@ -396,36 +269,4 @@
     border-radius: 4px; outline: none;
   }
   #msg-input:focus { border-color: #666; }
-  #settings-panel { padding: 12px; }
-  .settings-heading {
-    font-size: 13px; color: #aaa; font-weight: bold;
-    text-transform: uppercase; letter-spacing: 0.05em;
-    margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #333;
-  }
-  .settings-row {
-    display: flex; align-items: center; gap: 8px;
-    margin-bottom: 8px;
-  }
-  .settings-label { font-size: 12px; color: #888; min-width: 80px; }
-  .settings-value { font-size: 12px; color: #ccc; }
-  #hs-input, #user-input, #pass-input, #whisper-input, #whisper-model-input {
-    flex: 1; background: #1e1e1e; border: 1px solid #444; color: #eee;
-    font-family: monospace; font-size: 12px; padding: 4px 8px;
-    border-radius: 4px; outline: none;
-  }
-  #hs-input:focus, #user-input:focus, #pass-input:focus, #whisper-input:focus, #whisper-model-input:focus { border-color: #666; }
-  .save-btn {
-    padding: 4px 10px; border-radius: 4px; border: 1px solid #4caf50;
-    background: #1a2e1a; color: #4caf50; font-family: monospace; font-size: 12px;
-    cursor: pointer;
-  }
-  .save-btn:active { background: #2a3e2a; }
-  #save-status { font-size: 11px; margin-bottom: 12px; min-height: 16px; }
-  #error-log { margin-top: 16px; border-top: 1px solid #333; padding-top: 10px; }
-  #error-log h3 { font-size: 11px; color: #888; margin-bottom: 6px; }
-  .error-entry {
-    font-size: 11px; color: #f44336; padding: 2px 0;
-    border-bottom: 1px solid #222; word-break: break-all;
-  }
-  #no-errors { font-size: 11px; color: #555; }
 </style>

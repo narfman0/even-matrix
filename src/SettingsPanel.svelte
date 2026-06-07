@@ -1,0 +1,160 @@
+<script lang="ts">
+  import { MatrixRestClient } from './matrix-client'
+  import { pcmToWav } from './plugin'
+
+  let {
+    errors,
+    bridge,
+    homeserver,
+    username,
+    whisperUrl,
+    whisperModel: whisperModelProp,
+    appVersion,
+  }: {
+    errors: string[]
+    bridge: any
+    homeserver: string
+    username: string
+    whisperUrl: string
+    whisperModel: string
+    appVersion: string
+  } = $props()
+
+  let hsValue = $state(homeserver)
+  let userValue = $state(username)
+  let passValue = $state('')
+  let whisperValue = $state(whisperUrl)
+  let whisperModel = $state(whisperModelProp)
+  let saveStatus = $state('')
+  let saveColor = $state('#888')
+
+  async function saveCredentials() {
+    try {
+      const result = await MatrixRestClient.login(hsValue.trim(), userValue.trim(), passValue)
+      await bridge.setLocalStorage('even_matrix_homeserver', hsValue.trim())
+      await bridge.setLocalStorage('even_matrix_username', userValue.trim())
+      await bridge.setLocalStorage('even_matrix_access_token', result.access_token)
+      await bridge.setLocalStorage('even_matrix_user_id', result.user_id)
+      await bridge.setLocalStorage('even_matrix_device_id', result.device_id)
+      passValue = ''
+      saveStatus = 'Logged in. Reloading...'
+      saveColor = '#4caf50'
+      setTimeout(() => window.location.reload(), 800)
+    } catch (e) {
+      saveStatus = `Login failed: ${e}`
+      saveColor = '#f44336'
+    }
+  }
+
+  async function saveWhisper() {
+    try {
+      await bridge.setLocalStorage('even_matrix_whisper_url', whisperValue.trim())
+      await bridge.setLocalStorage('even_matrix_whisper_model', whisperModel.trim())
+      saveStatus = 'Saved. Reloading...'
+      saveColor = '#4caf50'
+      setTimeout(() => window.location.reload(), 800)
+    } catch {
+      saveStatus = 'Save failed.'
+      saveColor = '#f44336'
+    }
+  }
+
+  async function testWhisper() {
+    const url = whisperValue.trim()
+    if (!url) { saveStatus = 'Enter a Whisper URL first.'; saveColor = '#f44336'; return }
+    saveStatus = 'Testing...'
+    saveColor = '#888'
+    try {
+      const silence = new Uint8Array(16000 * 2)
+      const wav = pcmToWav(silence, 16000)
+      const form = new FormData()
+      form.append('file', new Blob([wav], { type: 'audio/wav' }), 'test.wav')
+      form.append('model', whisperModel.trim())
+      const res = await fetch(`${url}/v1/audio/transcriptions`, { method: 'POST', body: form, signal: AbortSignal.timeout(10000) })
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+      const json = await res.json() as { text?: string }
+      saveStatus = 'OK ✓'
+      saveColor = '#4caf50'
+    } catch (e) {
+      saveStatus = `Whisper test failed: ${e}`
+      saveColor = '#f44336'
+    }
+  }
+</script>
+
+<div id="settings-panel">
+  <div class="settings-heading">Settings</div>
+  <div class="settings-row">
+    <span class="settings-label">Version</span>
+    <span class="settings-value">v{appVersion}</span>
+  </div>
+  <div class="settings-row">
+    <label class="settings-label" for="hs-input">Homeserver</label>
+    <input id="hs-input" type="text" placeholder="https://matrix.example.com" bind:value={hsValue} />
+  </div>
+  <div class="settings-row">
+    <label class="settings-label" for="user-input">Username</label>
+    <input id="user-input" type="text" placeholder="alice" bind:value={userValue} />
+  </div>
+  <div class="settings-row">
+    <label class="settings-label" for="pass-input">Password</label>
+    <input id="pass-input" type="password" bind:value={passValue} />
+    <button class="save-btn" onclick={saveCredentials}>Login</button>
+  </div>
+  <div class="settings-row">
+    <label class="settings-label" for="whisper-input">Whisper URL</label>
+    <input id="whisper-input" type="text" placeholder="http://whisper-server:8080 (optional)" bind:value={whisperValue} />
+    <button class="save-btn" onclick={testWhisper}>Test</button>
+    <button class="save-btn" onclick={saveWhisper}>Save</button>
+  </div>
+  <div class="settings-row">
+    <label class="settings-label" for="whisper-model-input">Whisper Model</label>
+    <input id="whisper-model-input" type="text" placeholder="Systran/faster-distil-whisper-small.en" bind:value={whisperModel} />
+  </div>
+  <div id="save-status" style="color: {saveColor}">{saveStatus}</div>
+  <div id="error-log">
+    <h3>ERRORS</h3>
+    {#if errors.length === 0}
+      <div id="no-errors">none</div>
+    {:else}
+      {#each [...errors].reverse() as err}
+        <div class="error-entry">{err}</div>
+      {/each}
+    {/if}
+  </div>
+</div>
+
+<style>
+  #settings-panel { padding: 12px; }
+  .settings-heading {
+    font-size: 13px; color: #aaa; font-weight: bold;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #333;
+  }
+  .settings-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+  }
+  .settings-label { font-size: 12px; color: #888; min-width: 80px; }
+  .settings-value { font-size: 12px; color: #ccc; }
+  #hs-input, #user-input, #pass-input, #whisper-input, #whisper-model-input {
+    flex: 1; background: #1e1e1e; border: 1px solid #444; color: #eee;
+    font-family: monospace; font-size: 12px; padding: 4px 8px;
+    border-radius: 4px; outline: none;
+  }
+  #hs-input:focus, #user-input:focus, #pass-input:focus, #whisper-input:focus, #whisper-model-input:focus { border-color: #666; }
+  .save-btn {
+    padding: 4px 10px; border-radius: 4px; border: 1px solid #4caf50;
+    background: #1a2e1a; color: #4caf50; font-family: monospace; font-size: 12px;
+    cursor: pointer;
+  }
+  .save-btn:active { background: #2a3e2a; }
+  #save-status { font-size: 11px; margin-bottom: 12px; min-height: 16px; }
+  #error-log { margin-top: 16px; border-top: 1px solid #333; padding-top: 10px; }
+  #error-log h3 { font-size: 11px; color: #888; margin-bottom: 6px; }
+  .error-entry {
+    font-size: 11px; color: #f44336; padding: 2px 0;
+    border-bottom: 1px solid #222; word-break: break-all;
+  }
+  #no-errors { font-size: 11px; color: #555; }
+</style>
