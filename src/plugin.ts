@@ -372,7 +372,7 @@ export function createPlugin(
           if (done) break
           buf += dec.decode(value, { stream: true })
           const lines = buf.split('\n')
-          buf = lines.pop() ?? ''
+          buf = lines.pop() ?? '' // buf carries incomplete lines across reads
           for (const line of lines) {
             if (!line.startsWith('data: ')) continue
             const raw = line.slice(6).trim()
