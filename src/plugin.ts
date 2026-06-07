@@ -531,7 +531,7 @@ export function createPlugin(
           await showRoomList()
         }
       } else if (view === 'messages') {
-        if (et === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+        if (et === OsEventTypeList.DOUBLE_CLICK_EVENT && whisperUrl) {
           await startAudio()
         } else if (et === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
           if (scrollOffset >= lines.length - 1 && prevBatch) {

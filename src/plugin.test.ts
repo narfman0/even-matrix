@@ -320,7 +320,7 @@ describe('handleEvenHubEvent', () => {
   })
 
   it('double click in messages view starts audio and shows listening screen', async () => {
-    const { bridge, plugin, matrix } = makePlugin()
+    const { bridge, plugin, matrix } = makePlugin('http://whisper:8080')
     await goToMessages(matrix, plugin)
     bridge.rebuildPageContainer.mockClear()
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
@@ -331,9 +331,19 @@ describe('handleEvenHubEvent', () => {
     expect(arg.textObject[0].content).toBe('Listening...')
   })
 
+  it('double click does nothing when no whisper URL configured', async () => {
+    const { bridge, plugin, matrix } = makePlugin(null)
+    await goToMessages(matrix, plugin)
+    bridge.rebuildPageContainer.mockClear()
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
+    expect(bridge.audioControl).not.toHaveBeenCalled()
+    expect(plugin.getState().recognizing).toBe(false)
+    expect(plugin.getState().view).toBe('messages')
+  })
+
   it('tap in listening view stops audio after cooldown', async () => {
     vi.useFakeTimers()
-    const { bridge, plugin, matrix } = makePlugin()
+    const { bridge, plugin, matrix } = makePlugin('http://whisper:8080')
     await goToMessages(matrix, plugin)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
     expect(plugin.getState().view).toBe('listening')
@@ -352,7 +362,7 @@ describe('handleEvenHubEvent', () => {
 
   it('double click immediately after starting audio ignored (physical device race)', async () => {
     vi.useFakeTimers()
-    const { bridge, plugin, matrix } = makePlugin()
+    const { bridge, plugin, matrix } = makePlugin('http://whisper:8080')
     await goToMessages(matrix, plugin)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
     bridge.audioControl.mockClear()
@@ -380,7 +390,7 @@ describe('handleEvenHubEvent', () => {
 
   it('back gesture in listening view stops audio and returns to messages', async () => {
     vi.useFakeTimers()
-    const { bridge, plugin, matrix } = makePlugin()
+    const { bridge, plugin, matrix } = makePlugin('http://whisper:8080')
     await goToMessages(matrix, plugin)
     await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'DOUBLE_CLICK' } })
     expect(plugin.getState().view).toBe('listening')
