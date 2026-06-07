@@ -1,0 +1,8 @@
+export const STORAGE_HOMESERVER    = 'even_matrix_homeserver'
+export const STORAGE_ACCESS_TOKEN  = 'even_matrix_access_token'
+export const STORAGE_USER_ID       = 'even_matrix_user_id'
+export const STORAGE_USERNAME      = 'even_matrix_username'
+export const STORAGE_SYNC_TOKEN    = 'even_matrix_sync_token'
+export const STORAGE_WHISPER_URL   = 'even_matrix_whisper_url'
+export const STORAGE_WHISPER_MODEL = 'even_matrix_whisper_model'
+export const STORAGE_SELECTED_ROOM = 'even_matrix_selected_room'

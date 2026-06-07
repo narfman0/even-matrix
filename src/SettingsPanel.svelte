@@ -1,6 +1,14 @@
 <script lang="ts">
   import { MatrixRestClient } from './matrix-client'
   import { pcmToWav } from './plugin'
+  import {
+    STORAGE_HOMESERVER,
+    STORAGE_ACCESS_TOKEN,
+    STORAGE_USER_ID,
+    STORAGE_USERNAME,
+    STORAGE_WHISPER_URL,
+    STORAGE_WHISPER_MODEL,
+  } from './storage-keys'
 
   let {
     errors,
@@ -31,10 +39,10 @@
   async function saveCredentials() {
     try {
       const result = await MatrixRestClient.login(hsValue.trim(), userValue.trim(), passValue)
-      await bridge.setLocalStorage('even_matrix_homeserver', hsValue.trim())
-      await bridge.setLocalStorage('even_matrix_username', userValue.trim())
-      await bridge.setLocalStorage('even_matrix_access_token', result.access_token)
-      await bridge.setLocalStorage('even_matrix_user_id', result.user_id)
+      await bridge.setLocalStorage(STORAGE_HOMESERVER, hsValue.trim())
+      await bridge.setLocalStorage(STORAGE_USERNAME, userValue.trim())
+      await bridge.setLocalStorage(STORAGE_ACCESS_TOKEN, result.access_token)
+      await bridge.setLocalStorage(STORAGE_USER_ID, result.user_id)
       await bridge.setLocalStorage('even_matrix_device_id', result.device_id)
       passValue = ''
       saveStatus = 'Logged in. Reloading...'
@@ -48,8 +56,8 @@
 
   async function saveWhisper() {
     try {
-      await bridge.setLocalStorage('even_matrix_whisper_url', whisperValue.trim())
-      await bridge.setLocalStorage('even_matrix_whisper_model', whisperModel.trim())
+      await bridge.setLocalStorage(STORAGE_WHISPER_URL, whisperValue.trim())
+      await bridge.setLocalStorage(STORAGE_WHISPER_MODEL, whisperModel.trim())
       saveStatus = 'Saved. Reloading...'
       saveColor = '#4caf50'
       setTimeout(() => window.location.reload(), 800)

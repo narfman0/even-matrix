@@ -7,6 +7,16 @@
   } from '@evenrealities/even_hub_sdk'
   import { createPlugin } from './plugin'
   import { MatrixRestClient } from './matrix-client'
+  import {
+    STORAGE_HOMESERVER,
+    STORAGE_ACCESS_TOKEN,
+    STORAGE_USER_ID,
+    STORAGE_USERNAME,
+    STORAGE_SYNC_TOKEN,
+    STORAGE_WHISPER_URL,
+    STORAGE_WHISPER_MODEL,
+    STORAGE_SELECTED_ROOM,
+  } from './storage-keys'
   import appJson from '../app.json'
   import MessageList from './MessageList.svelte'
   import SettingsPanel from './SettingsPanel.svelte'
@@ -73,14 +83,14 @@
       })
     )
 
-    const homeserver    = await bridge.getLocalStorage('even_matrix_homeserver').catch(() => '')
-    const accessToken   = await bridge.getLocalStorage('even_matrix_access_token').catch(() => '')
-    const userId        = await bridge.getLocalStorage('even_matrix_user_id').catch(() => '')
-    const syncToken     = await bridge.getLocalStorage('even_matrix_sync_token').catch(() => null)
-    const whisperUrl    = await bridge.getLocalStorage('even_matrix_whisper_url').catch(() => null)
-    const whisperMdl    = await bridge.getLocalStorage('even_matrix_whisper_model').catch(() => null)
-    const savedUser     = await bridge.getLocalStorage('even_matrix_username').catch(() => '')
-    const savedRoomId   = await bridge.getLocalStorage('even_matrix_selected_room').catch(() => null)
+    const homeserver    = await bridge.getLocalStorage(STORAGE_HOMESERVER).catch(() => '')
+    const accessToken   = await bridge.getLocalStorage(STORAGE_ACCESS_TOKEN).catch(() => '')
+    const userId        = await bridge.getLocalStorage(STORAGE_USER_ID).catch(() => '')
+    const syncToken     = await bridge.getLocalStorage(STORAGE_SYNC_TOKEN).catch(() => null)
+    const whisperUrl    = await bridge.getLocalStorage(STORAGE_WHISPER_URL).catch(() => null)
+    const whisperMdl    = await bridge.getLocalStorage(STORAGE_WHISPER_MODEL).catch(() => null)
+    const savedUser     = await bridge.getLocalStorage(STORAGE_USERNAME).catch(() => '')
+    const savedRoomId   = await bridge.getLocalStorage(STORAGE_SELECTED_ROOM).catch(() => null)
 
     settingsHomeserver = homeserver
     settingsUsername = savedUser
@@ -96,8 +106,8 @@
     plugin = createPlugin(bridge, matrix, whisperUrl || null, settingsWhisperModel, () => {
       state = plugin!.getState()
       const s = plugin!.getState()
-      if (s.syncToken) bridge.setLocalStorage('even_matrix_sync_token', s.syncToken)
-      if (s.selectedRoomId) bridge.setLocalStorage('even_matrix_selected_room', s.selectedRoomId)
+      if (s.syncToken) bridge.setLocalStorage(STORAGE_SYNC_TOKEN, s.syncToken)
+      if (s.selectedRoomId) bridge.setLocalStorage(STORAGE_SELECTED_ROOM, s.selectedRoomId)
     })
     bridge.onEvenHubEvent(plugin.handleEvenHubEvent)
     await plugin.start(syncToken)
