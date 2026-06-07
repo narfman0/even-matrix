@@ -1,6 +1,7 @@
 <script lang="ts">
   import { MatrixRestClient } from './matrix-client'
   import { pcmToWav } from './plugin'
+  import { probeWasm } from './wasm-probe'
   import {
     STORAGE_HOMESERVER,
     STORAGE_ACCESS_TOKEN,
@@ -35,6 +36,18 @@
   let whisperModel = $state(whisperModelProp)
   let saveStatus = $state('')
   let saveColor = $state('#888')
+  let wasmStatus = $state('')
+  let wasmColor = $state('#888')
+
+  async function testWasmProbe() {
+    wasmStatus = 'Testing WASM…'
+    wasmColor = '#888'
+    const result = await probeWasm()
+    wasmStatus = result.ok
+      ? `WASM OK ✓ (${result.durationMs}ms) — ${result.detail}`
+      : `WASM FAILED: ${result.detail}`
+    wasmColor = result.ok ? '#4caf50' : '#f44336'
+  }
 
   async function saveCredentials() {
     try {
@@ -123,6 +136,16 @@
     <input id="whisper-model-input" type="text" placeholder="Systran/faster-distil-whisper-small.en" bind:value={whisperModel} />
   </div>
   <div id="save-status" style="color: {saveColor}">{saveStatus}</div>
+
+  <div class="settings-row spike-row">
+    <span class="settings-label">E2EE WASM</span>
+    <span class="spike-note">spike — remove after E2EE migration</span>
+    <button class="save-btn" onclick={testWasmProbe}>Test WASM</button>
+  </div>
+  {#if wasmStatus}
+    <div id="wasm-status" style="color: {wasmColor}">{wasmStatus}</div>
+  {/if}
+
   <div id="error-log">
     <h3>ERRORS</h3>
     {#if errors.length === 0}
@@ -168,4 +191,7 @@
     border-bottom: 1px solid #222; word-break: break-all;
   }
   #no-errors { font-size: 11px; color: #555; }
+  .spike-row { border-top: 1px dashed #444; padding-top: 8px; margin-top: 4px; }
+  .spike-note { font-size: 10px; color: #555; font-style: italic; flex: 1; }
+  #wasm-status { font-size: 11px; margin-bottom: 8px; word-break: break-all; }
 </style>
