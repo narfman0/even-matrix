@@ -908,3 +908,87 @@ describe('auto-follow behavior', () => {
     expect(bridge.textContainerUpgrade).toHaveBeenCalledTimes(1)
   })
 })
+
+// ─── Feature 5: Connection health strip ──────────────────────────────────────
+
+describe('connection health strip (feature 5)', () => {
+  it('lastSyncAt is null before sync token callback fires', async () => {
+    const { plugin, matrix } = makePlugin()
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [] }, nextBatch: 'batch-0' })
+    await plugin.start(null)
+    expect(plugin.getState().lastSyncAt).toBeNull()
+  })
+
+  it('lastSyncAt is set to a number after sync token callback fires', async () => {
+    const { plugin, matrix } = makePlugin()
+    await plugin.start(null)
+    matrix.triggerSyncToken('s_tok')
+    expect(typeof plugin.getState().lastSyncAt).toBe('number')
+    expect(plugin.getState().lastSyncAt).toBeGreaterThan(0)
+  })
+
+  it('whisperConfigured is false with no whisperUrl', async () => {
+    const { plugin } = makePlugin(null)
+    expect(plugin.getState().whisperConfigured).toBe(false)
+  })
+
+  it('whisperConfigured is true when whisperUrl is provided', async () => {
+    const { plugin } = makePlugin('http://whisper:8080')
+    expect(plugin.getState().whisperConfigured).toBe(true)
+  })
+})
+
+// ─── Feature 6: Audio buffer gauge ───────────────────────────────────────────
+
+describe('audio buffer gauge (feature 6)', () => {
+  it('audioBufBytes reflects accumulated byte count after audio events', async () => {
+    const { plugin, matrix } = makePlugin()
+    await goToMessages(matrix, plugin)
+    await plugin.startAudio()
+    const chunk1 = new Uint8Array(100)
+    const chunk2 = new Uint8Array(200)
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: chunk1 } })
+    expect(plugin.getState().audioBufBytes).toBe(100)
+    await plugin.handleEvenHubEvent({ audioEvent: { audioPcm: chunk2 } })
+    expect(plugin.getState().audioBufBytes).toBe(300)
+  })
+})
+
+// ─── Feature 7: Per-room unread dot ──────────────────────────────────────────
+
+describe('per-room unread dot (feature 7)', () => {
+  it('sync message to non-selected room adds to unreadRooms', async () => {
+    const { plugin, matrix } = makePlugin()
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }, { id: 'room-2', name: 'Room2' }] }, nextBatch: 'batch-0' })
+    await plugin.start(null)
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    expect(plugin.getState().selectedRoomId).toBe('room-1')
+    await matrix.triggerSyncMessage('room-2', 'ev-x', 'Bob', 'hi')
+    expect(plugin.getState().unreadRooms).toContain('room-2')
+  })
+
+  it('selecting a room removes it from unreadRooms', async () => {
+    const { plugin, matrix } = makePlugin()
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }, { id: 'room-2', name: 'Room2' }] }, nextBatch: 'batch-0' })
+    await plugin.start(null)
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    await matrix.triggerSyncMessage('room-2', 'ev-x', 'Bob', 'hi')
+    expect(plugin.getState().unreadRooms).toContain('room-2')
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 1 } })
+    expect(plugin.getState().unreadRooms).not.toContain('room-2')
+  })
+
+  it('sync message to currently selected room does NOT add to unreadRooms', async () => {
+    const { plugin, matrix } = makePlugin()
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
+    await plugin.start(null)
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    expect(plugin.getState().selectedRoomId).toBe('room-1')
+    await matrix.triggerSyncMessage('room-1', 'ev-y', 'Alice', 'hello')
+    expect(plugin.getState().unreadRooms).not.toContain('room-1')
+  })
+})

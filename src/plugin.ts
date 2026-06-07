@@ -137,6 +137,8 @@ export function createPlugin(
   let syncToken: string | null = null
   let errors: string[] = []
 
+  let lastSyncAt: number | null = null
+  let unreadRooms: Set<string> = new Set()
   let audioBuf: Uint8Array[] = []
   let audioLevel: number = 0
   let seenEventIds: Set<string> = new Set()
@@ -332,7 +334,12 @@ export function createPlugin(
     if (eventId && seenEventIds.has(eventId)) return
     if (eventId) seenEventIds.add(eventId)
     const age = ts != null ? formatAge(ts) : formatAge(Date.now())
-    if (roomId === selectedRoomId) await appendLine(`[${age}] ${sender}: ${text}`)
+    if (roomId === selectedRoomId) {
+      await appendLine(`[${age}] ${sender}: ${text}`)
+    } else {
+      unreadRooms.add(roomId)
+      onUpdate?.()
+    }
   }
 
   async function start(token: string | null) {
@@ -346,6 +353,7 @@ export function createPlugin(
       await showRoomList()
       matrix.startSyncLoop(token ?? nextBatch, onSyncMessage, (newToken) => {
         syncToken = newToken
+        lastSyncAt = Date.now()
         onUpdate?.()
       })
     } catch (err) {
@@ -524,6 +532,7 @@ export function createPlugin(
           roomNavStartedAt = Date.now()
           const seq = ++navSeq
           selectedRoomId = item.id
+          unreadRooms.delete(item.id)
           await showLoadingView(item.name)
           if (seq !== navSeq) return
           try {
@@ -661,7 +670,7 @@ export function createPlugin(
   }
 
   function getState() {
-    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken, prevBatch, loadingMore, audioLevel }
+    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken, prevBatch, loadingMore, audioLevel, lastSyncAt, whisperConfigured: !!whisperUrl, audioBufBytes: audioBuf.reduce((n, c) => n + c.length, 0), audioMaxBytes: AUDIO_MAX_BYTES, unreadRooms: [...unreadRooms] }
   }
 
   return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage, navigateToRoom, loadMoreHistory }

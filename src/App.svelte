@@ -7,6 +7,7 @@
   } from '@evenrealities/even_hub_sdk'
   import { createPlugin } from './plugin'
   import { MatrixRestClient } from './matrix-client'
+  import { formatAge, visibleLines } from './message-utils'
   import {
     STORAGE_HOMESERVER,
     STORAGE_ACCESS_TOKEN,
@@ -43,8 +44,14 @@
     prevBatch: null,
     loadingMore: false,
     audioLevel: 0,
+    lastSyncAt: null,
+    whisperConfigured: false,
+    audioBufBytes: 0,
+    audioMaxBytes: 10 * 1024 * 1024,
+    unreadRooms: [],
   })
   let settingsOpen = $state(false)
+  let previewOpen = $state(false)
   let msgInput = $state('')
 
   // Settings props for SettingsPanel
@@ -55,6 +62,21 @@
 
   let plugin: Plugin | null = null
   let bridge: any = null
+
+  function glassesPreviewText(): string {
+    switch (state.view) {
+      case 'rooms': return state.displayedRooms.map(r => r.name).join('\n') || '(no rooms)'
+      case 'loading': return `Loading ${state.loadingRoomName}...`
+      case 'listening': return state.transcribedText || 'Listening...'
+      case 'transcribing': return state.transcribedText || 'Transcribing...'
+      case 'sending': return `Sending: ${state.transcribedText}`
+      case 'messages': {
+        const vl = visibleLines(state.lines, state.scrollOffset)
+        return vl.join('\n') || '(no messages)'
+      }
+      default: return ''
+    }
+  }
 
   async function selectRoom(index: number, id: string) {
     await plugin?.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: index } })
@@ -119,10 +141,32 @@
 
 <div id="status-bar">
   <span id="view-label">{settingsOpen ? 'settings' : state.view}</span>
+  <button id="preview-btn" title="Glasses Preview" onclick={() => (previewOpen = !previewOpen)}>
+    {previewOpen ? '🕶' : '👓'}
+  </button>
   <button id="settings-btn" title="Settings" onclick={() => (settingsOpen = !settingsOpen)}>
     {settingsOpen ? '✕' : '⚙'}
   </button>
 </div>
+
+{#if !settingsOpen}
+  <div id="health-strip">
+    <span class:dot-green={state.matrixConnected} class:dot-grey={!state.matrixConnected}>●</span>
+    Matrix
+    {#if state.lastSyncAt}· {formatAge(state.lastSyncAt)} ago{/if}
+    &nbsp;&nbsp;
+    <span class:dot-green={state.whisperConfigured} class:dot-grey={!state.whisperConfigured}>◉</span>
+    STT
+  </div>
+{/if}
+
+{#if previewOpen && !settingsOpen}
+  <div id="glasses-preview">
+    <div id="glasses-screen">
+      <pre>{glassesPreviewText()}</pre>
+    </div>
+  </div>
+{/if}
 
 {#if !settingsOpen && (state.view === 'messages' || state.view === 'listening' || state.view === 'loading')}
   <div id="controls">
@@ -167,6 +211,7 @@
               onclick={() => selectRoom(index, item.id)}
             >
               {item.name}
+              {#if state.unreadRooms.includes(item.id)}<span class="unread-dot"></span>{/if}
             </div>
           {/if}
         {/each}
@@ -182,6 +227,9 @@
       </div>
       <div class="level-track">
         <div class="level-bar" style="width: {Math.round(state.audioLevel * 100)}%"></div>
+      </div>
+      <div class="buf-gauge">
+        🎙 {(state.audioBufBytes / 32000).toFixed(1)}s / {(state.audioMaxBytes / 32000).toFixed(0)}s
       </div>
     {:else if state.view === 'transcribing'}
       <div class="transcribing-indicator">
@@ -295,4 +343,33 @@
     border-radius: 4px; outline: none;
   }
   #msg-input:focus { border-color: #666; }
+  #health-strip {
+    font-size: 10px; padding: 3px 12px; background: #181818;
+    border-bottom: 1px solid #2a2a2a; color: #666; white-space: nowrap;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .dot-green { color: #4caf50; }
+  .dot-grey  { color: #444; }
+  #preview-btn {
+    background: none; border: none; color: #888; font-size: 16px;
+    cursor: pointer; padding: 0 4px; line-height: 1;
+  }
+  #preview-btn:hover { color: #eee; }
+  #glasses-preview {
+    display: flex; justify-content: center; padding: 8px; background: #111;
+    border-bottom: 1px solid #2a2a2a;
+  }
+  #glasses-screen {
+    width: 288px; height: 144px; background: #000; border: 1px solid #333;
+    font-size: 10px; font-family: monospace; overflow: hidden;
+    padding: 4px; white-space: pre-wrap;
+  }
+  #glasses-screen pre { margin: 0; font-family: inherit; font-size: inherit; }
+  .buf-gauge {
+    font-size: 11px; color: #555; padding: 2px 12px;
+  }
+  .unread-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #4caf50;
+    display: inline-block; margin-left: 6px; vertical-align: middle;
+  }
 </style>
