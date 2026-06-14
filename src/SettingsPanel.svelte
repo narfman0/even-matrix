@@ -137,9 +137,8 @@
   </div>
   <div id="save-status" style="color: {saveColor}">{saveStatus}</div>
 
-  <div class="settings-row spike-row">
-    <span class="settings-label">E2EE WASM</span>
-    <span class="spike-note">spike — remove after E2EE migration</span>
+  <div class="settings-row diag-row">
+    <span class="settings-label">Diagnostics</span>
     <button class="save-btn" onclick={testWasmProbe}>Test WASM</button>
   </div>
   {#if wasmStatus}
@@ -191,7 +190,6 @@
     border-bottom: 1px solid #222; word-break: break-all;
   }
   #no-errors { font-size: 11px; color: #555; }
-  .spike-row { border-top: 1px dashed #444; padding-top: 8px; margin-top: 4px; }
-  .spike-note { font-size: 10px; color: #555; font-style: italic; flex: 1; }
+  .diag-row { border-top: 1px solid #333; padding-top: 8px; margin-top: 4px; }
   #wasm-status { font-size: 11px; margin-bottom: 8px; word-break: break-all; }
 </style>

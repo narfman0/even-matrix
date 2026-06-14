@@ -1,4 +1,3 @@
-// SPIKE: one-shot WASM probe — remove after E2EE migration is confirmed
 export async function probeWasm(): Promise<{ ok: boolean; detail: string; durationMs: number }> {
   const t0 = Date.now()
   try {
