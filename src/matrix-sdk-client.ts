@@ -23,6 +23,12 @@ export class MatrixSdkClient implements MatrixClient {
   }
 
   async initialSync(): Promise<{ hierarchy: RoomHierarchy; nextBatch: string }> {
+    try {
+      await this.client.initRustCrypto()
+    } catch (err) {
+      console.warn('[even-matrix] initRustCrypto failed:', err)
+    }
+
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('initialSync timeout')), 30000)
       this.client.once(ClientEvent.Sync, (state: SyncState) => {
@@ -93,7 +99,8 @@ export class MatrixSdkClient implements MatrixClient {
 
     const messages: MatrixMessage[] = []
     for (const ev of ([...(res.chunk ?? [])]).reverse()) {
-      if (ev.type !== 'm.room.message') continue
+      const type = ev.type
+      if (type !== 'm.room.message' && type !== 'm.room.encrypted') continue
       const content = ev.content
       if (!content || content.msgtype !== 'm.text') continue
       messages.push({
