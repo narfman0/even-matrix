@@ -7,6 +7,7 @@
   } from '@evenrealities/even_hub_sdk'
   import { createPlugin } from './plugin'
   import { MatrixRestClient } from './matrix-client'
+  import { MatrixSdkClient } from './matrix-sdk-client'
   import { formatAge, visibleLines } from './message-utils'
   import {
     STORAGE_HOMESERVER,
@@ -17,6 +18,7 @@
     STORAGE_WHISPER_URL,
     STORAGE_WHISPER_MODEL,
     STORAGE_SELECTED_ROOM,
+    STORAGE_DEVICE_ID,
   } from './storage-keys'
   import appJson from '../app.json'
   import MessageList from './MessageList.svelte'
@@ -115,6 +117,7 @@
     const whisperMdl    = await bridge.getLocalStorage(STORAGE_WHISPER_MODEL).catch(() => null)
     const savedUser     = await bridge.getLocalStorage(STORAGE_USERNAME).catch(() => '')
     const savedRoomId   = await bridge.getLocalStorage(STORAGE_SELECTED_ROOM).catch(() => null)
+    const deviceId      = await bridge.getLocalStorage(STORAGE_DEVICE_ID).catch(() => '')
 
     settingsHomeserver = homeserver
     settingsUsername = savedUser
@@ -126,7 +129,7 @@
       return
     }
 
-    const matrix = new MatrixRestClient(homeserver, accessToken, userId)
+    const matrix = new MatrixSdkClient(homeserver, accessToken, userId, deviceId || '')
     plugin = createPlugin(bridge, matrix, whisperUrl || null, settingsWhisperModel, () => {
       state = plugin!.getState()
       const s = plugin!.getState()
