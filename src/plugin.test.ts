@@ -22,10 +22,10 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makePlugin(whisperUrl: string | null = null) {
+function makePlugin(whisperUrl: string | null = null, userId: string = '') {
   const bridge = makeMockBridge()
   const matrix = makeFakeMatrixClient()
-  const plugin = createPlugin(bridge, matrix, whisperUrl)
+  const plugin = createPlugin(bridge, matrix, whisperUrl, undefined, undefined, userId)
   return { bridge, plugin, matrix }
 }
 
@@ -1040,5 +1040,73 @@ describe('per-room unread dot (feature 7)', () => {
     expect(plugin.getState().selectedRoomId).toBe('room-1')
     await matrix.triggerSyncMessage('room-1', 'ev-y', 'Alice', 'hello')
     expect(plugin.getState().unreadRooms).not.toContain('room-1')
+  })
+})
+
+// ─── Feature 9: @mention highlighting ────────────────────────────────────────
+
+describe('@mention highlighting', () => {
+  it('message containing local part of userId sets mention flag', async () => {
+    const { plugin, matrix } = makePlugin(null, '@narfman0:matrix.org')
+    await goToMessages(matrix, plugin, [{ sender: 'Alice', text: 'hey narfman0 how are you?' }])
+    const { mentions } = plugin.getState()
+    expect(mentions[0]).toBe(true)
+  })
+
+  it('message not containing userId does not set mention flag', async () => {
+    const { plugin, matrix } = makePlugin(null, '@narfman0:matrix.org')
+    await goToMessages(matrix, plugin, [{ sender: 'Alice', text: 'hey everyone!' }])
+    const { mentions } = plugin.getState()
+    expect(mentions[0]).toBe(false)
+  })
+
+  it('mention detection is case-insensitive', async () => {
+    const { plugin, matrix } = makePlugin(null, '@narfman0:matrix.org')
+    await goToMessages(matrix, plugin, [{ sender: 'Alice', text: 'NARFMAN0 check this out' }])
+    const { mentions } = plugin.getState()
+    expect(mentions[0]).toBe(true)
+  })
+
+  it('no userId set means no mentions flagged', async () => {
+    const { plugin, matrix } = makePlugin(null, '')
+    await goToMessages(matrix, plugin, [{ sender: 'Alice', text: 'narfman0 hello' }])
+    const { mentions } = plugin.getState()
+    expect(mentions[0]).toBe(false)
+  })
+
+  it('sync message that mentions user sets mentioned flag', async () => {
+    const { plugin, matrix } = makePlugin(null, '@narfman0:matrix.org')
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
+    await plugin.start(null)
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    await matrix.triggerSyncMessage('room-1', 'ev-m', 'Bob', '@narfman0 ping!')
+    const { mentioned, mentions } = plugin.getState()
+    expect(mentioned).toBe(true)
+    expect(mentions.at(-1)).toBe(true)
+  })
+
+  it('sync message that does not mention user does not set mentioned flag', async () => {
+    const { plugin, matrix } = makePlugin(null, '@narfman0:matrix.org')
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
+    await plugin.start(null)
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    await matrix.triggerSyncMessage('room-1', 'ev-n', 'Bob', 'just chatting')
+    const { mentioned } = plugin.getState()
+    expect(mentioned).toBe(false)
+  })
+
+  it('multiple messages: only mentioning ones flagged', async () => {
+    const { plugin, matrix } = makePlugin(null, '@alice:matrix.org')
+    await goToMessages(matrix, plugin, [
+      { sender: 'Bob', text: 'hello everyone' },
+      { sender: 'Carol', text: 'hey alice look at this' },
+      { sender: 'Dave', text: 'nice day' },
+    ])
+    const { mentions } = plugin.getState()
+    expect(mentions[0]).toBe(false)
+    expect(mentions[1]).toBe(true)
+    expect(mentions[2]).toBe(false)
   })
 })

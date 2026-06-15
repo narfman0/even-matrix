@@ -35,6 +35,8 @@
     displayedRooms: [],
     selectedRoomId: null,
     lines: [],
+    mentions: [],
+    mentioned: false,
     view: 'rooms',
     loadingRoomName: '',
     transcribedText: '',
@@ -135,7 +137,7 @@
       const s = plugin!.getState()
       if (s.syncToken) bridge.setLocalStorage(STORAGE_SYNC_TOKEN, s.syncToken)
       if (s.selectedRoomId) bridge.setLocalStorage(STORAGE_SELECTED_ROOM, s.selectedRoomId)
-    })
+    }, userId)
     bridge.onEvenHubEvent(plugin.handleEvenHubEvent)
     await plugin.start(syncToken)
     if (savedRoomId) await plugin.navigateToRoom(savedRoomId)
@@ -160,6 +162,7 @@
     &nbsp;&nbsp;
     <span class:dot-green={state.whisperConfigured} class:dot-grey={!state.whisperConfigured}>◉</span>
     STT
+    {#if state.mentioned}&nbsp;&nbsp;<span class="mention-flag">● mention</span>{/if}
   </div>
 {/if}
 
@@ -245,7 +248,7 @@
         Sending: {state.transcribedText}
       </div>
     {:else}
-      <MessageList lines={state.lines} scrollOffset={state.scrollOffset} />
+      <MessageList lines={state.lines} scrollOffset={state.scrollOffset} mentions={state.mentions} />
       {#if state.prevBatch !== null}
         <button class="load-more-btn" onclick={loadMore} disabled={state.loadingMore}>
           {state.loadingMore ? 'Loading...' : 'Load more'}
@@ -353,6 +356,7 @@
   }
   .dot-green { color: #4caf50; }
   .dot-grey  { color: #444; }
+  .mention-flag { color: #f7c67e; font-weight: bold; }
   #preview-btn {
     background: none; border: none; color: #888; font-size: 16px;
     cursor: pointer; padding: 0 4px; line-height: 1;

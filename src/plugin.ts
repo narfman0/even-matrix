@@ -67,6 +67,13 @@ function truncateToBytes(s: string, max: number): string {
   return new TextDecoder().decode(bytes.slice(0, cut)) + '…'
 }
 
+function isMention(text: string, userId: string): boolean {
+  if (!userId) return false
+  const localPart = userId.split(':')[0].replace(/^@/, '').toLowerCase()
+  if (!localPart) return false
+  return text.toLowerCase().includes(localPart)
+}
+
 function buildContent(lines: string[], offset = 0): string {
   const end = Math.max(0, lines.length - offset)
   const slice = lines.slice(0, end).reverse()
@@ -123,12 +130,15 @@ export function createPlugin(
   matrix: MatrixClient,
   whisperUrl: string | null = null,
   whisperModel: string = 'Systran/faster-distil-whisper-small.en',
-  onUpdate?: () => void
+  onUpdate?: () => void,
+  userId: string = ''
 ) {
   let hierarchy: RoomHierarchy = { dms: [], spaces: [], orphans: [] }
   let displayedRooms: DisplayItem[] = []
   let selectedRoomId: string | null = null
   let lines: string[] = []
+  let mentions: boolean[] = []
+  let mentioned: boolean = false
   let view: 'rooms' | 'messages' | 'listening' | 'loading' | 'transcribing' | 'sending' = 'rooms'
   let loadingRoomName: string = ''
   let transcribedText: string = ''
@@ -294,6 +304,7 @@ export function createPlugin(
   async function showMessageView(initialLines: string[]) {
     log('info', 'showMessageView', { lineCount: initialLines.length })
     lines = initialLines
+    mentions = initialLines.map(l => isMention(l, userId))
     scrollOffset = 0
     view = 'messages'
     onUpdate?.()
@@ -314,8 +325,10 @@ export function createPlugin(
     }
   }
 
-  async function appendLine(line: string) {
+  async function appendLine(line: string, isMentionLine = false) {
     lines.push(line)
+    mentions.push(isMentionLine)
+    if (isMentionLine) mentioned = true
     onUpdate?.()
     if (view === 'messages' && scrollOffset === 0) {
       try {
@@ -335,7 +348,8 @@ export function createPlugin(
     if (eventId) seenEventIds.add(eventId)
     const age = ts != null ? formatAge(ts) : formatAge(Date.now())
     if (roomId === selectedRoomId) {
-      await appendLine(`[${age}] ${sender}: ${text}`)
+      const line = `[${age}] ${sender}: ${text}`
+      await appendLine(line, isMention(text, userId))
     } else {
       unreadRooms.add(roomId)
       onUpdate?.()
@@ -649,8 +663,10 @@ export function createPlugin(
       }))
       const result = await matrix.fetchHistory(selectedRoomId, 50, prevBatch)
       const newLines = result.messages.map((m: MatrixMessage) => `[${formatAge(m.ts * 1000)}] ${m.sender}: ${m.text}`)
+      const newMentions = result.messages.map((m: MatrixMessage) => isMention(m.text, userId))
       result.messages.forEach(m => { if (m.event_id) seenEventIds.add(m.event_id) })
       lines = [...newLines, ...lines]
+      mentions = [...newMentions, ...mentions]
       prevBatch = result.prevBatch
     } catch (err) {
       log('error', 'loadMoreHistory failed', err)
@@ -670,7 +686,7 @@ export function createPlugin(
   }
 
   function getState() {
-    return { hierarchy, displayedRooms, selectedRoomId, lines, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken, prevBatch, loadingMore, audioLevel, lastSyncAt, whisperConfigured: !!whisperUrl, audioBufBytes: audioBuf.reduce((n, c) => n + c.length, 0), audioMaxBytes: AUDIO_MAX_BYTES, unreadRooms: [...unreadRooms] }
+    return { hierarchy, displayedRooms, selectedRoomId, lines, mentions, mentioned, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken, prevBatch, loadingMore, audioLevel, lastSyncAt, whisperConfigured: !!whisperUrl, audioBufBytes: audioBuf.reduce((n, c) => n + c.length, 0), audioMaxBytes: AUDIO_MAX_BYTES, unreadRooms: [...unreadRooms] }
   }
 
   return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage, navigateToRoom, loadMoreHistory }
