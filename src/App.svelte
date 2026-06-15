@@ -66,6 +66,7 @@
 
   let plugin: Plugin | null = null
   let bridge: any = null
+  let matrixClient: import('./matrix-sdk-client').MatrixSdkClient | null = null
 
   function glassesPreviewText(): string {
     switch (state.view) {
@@ -131,7 +132,8 @@
       return
     }
 
-    const matrix = new MatrixSdkClient(homeserver, accessToken, userId, deviceId || '')
+    matrixClient = new MatrixSdkClient(homeserver, accessToken, userId, deviceId || '')
+    const matrix = matrixClient
     plugin = createPlugin(bridge, matrix, whisperUrl || null, settingsWhisperModel, () => {
       state = plugin!.getState()
       const s = plugin!.getState()
@@ -200,6 +202,7 @@
     whisperUrl={settingsWhisperUrl}
     whisperModel={settingsWhisperModel}
     appVersion={APP_VERSION}
+    matrix={matrixClient}
   />
 {:else}
   <div id="content">

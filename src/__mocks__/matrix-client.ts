@@ -5,6 +5,7 @@ export function makeFakeMatrixClient() {
   let onMessageCb: ((roomId: string, eventId: string, sender: string, text: string, replyTo?: string) => void) | null = null
   let onTokenCb: ((token: string) => void) | null = null
   let onReactionCb: ((roomId: string, targetEventId: string, emoji: string) => void) | null = null
+  let onVerificationRequestCb: ((request: any) => void) | null = null
 
   return {
     initialSync: vi.fn().mockResolvedValue({ hierarchy: { dms: [], spaces: [], orphans: [] }, nextBatch: 'batch-0' }),
@@ -21,6 +22,14 @@ export function makeFakeMatrixClient() {
       onReactionCb = onReaction ?? null
     }),
     stopSyncLoop: vi.fn(),
+    getCrossSigningStatus: vi.fn().mockResolvedValue('not-setup'),
+    bootstrapE2EE: vi.fn().mockResolvedValue(undefined),
+    onVerificationRequest: vi.fn((cb: (request: any) => void) => {
+      onVerificationRequestCb = cb
+    }),
+    runSasVerification: vi.fn().mockResolvedValue(['🦁', '🐧', '🌈', '🦊', '🐸', '🐬', '🦋']),
+    confirmSas: vi.fn().mockResolvedValue(undefined),
+    rejectSas: vi.fn().mockResolvedValue(undefined),
 
     async triggerSyncMessage(roomId: string, eventId: string, sender: string, text: string, replyTo?: string) {
       await onMessageCb?.(roomId, eventId, sender, text, replyTo)
@@ -30,6 +39,9 @@ export function makeFakeMatrixClient() {
     },
     async triggerReaction(roomId: string, targetEventId: string, emoji: string) {
       await onReactionCb?.(roomId, targetEventId, emoji)
+    },
+    async triggerVerificationRequest(request: any) {
+      await onVerificationRequestCb?.(request)
     },
   }
 }

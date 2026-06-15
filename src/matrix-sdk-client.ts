@@ -6,6 +6,8 @@ import {
   MatrixEventEvent,
   SyncState,
 } from 'matrix-js-sdk'
+import { CryptoEvent } from 'matrix-js-sdk/lib/crypto-api/CryptoEvent'
+import { VerifierEvent } from 'matrix-js-sdk/lib/crypto-api/verification'
 import type { MatrixClient as SdkMatrixClient } from 'matrix-js-sdk'
 import type { MatrixClient, MatrixMessage, RoomHierarchy, RoomInfo } from './matrix-client'
 
@@ -232,6 +234,61 @@ export class MatrixSdkClient implements MatrixClient {
   stopSyncLoop(): void {
     this.running = false
     this.client.stopClient()
+  }
+
+  async getCrossSigningStatus(): Promise<'ready' | 'not-setup' | 'unavailable'> {
+    try {
+      const crypto = this.client.getCrypto()
+      if (!crypto) return 'unavailable'
+      const ready = await crypto.isCrossSigningReady()
+      return ready ? 'ready' : 'not-setup'
+    } catch {
+      return 'unavailable'
+    }
+  }
+
+  async bootstrapE2EE(passphrase: string): Promise<void> {
+    const crypto = this.client.getCrypto()
+    if (!crypto) throw new Error('Crypto not initialized')
+
+    await crypto.bootstrapSecretStorage({
+      createSecretStorageKey: async () => ({
+        keyInfo: {},
+        privateKey: new TextEncoder().encode(passphrase).slice(0, 32) as Uint8Array<ArrayBuffer>,
+      }),
+    })
+    await crypto.bootstrapCrossSigning({
+      authUploadDeviceSigningKeys: async (makeRequest) => {
+        await makeRequest({})
+      },
+    })
+  }
+
+  onVerificationRequest(cb: (request: any) => void): void {
+    this.client.on(CryptoEvent.VerificationRequestReceived as any, (request: any) => {
+      if (request.isSelfVerification) cb(request)
+    })
+  }
+
+  async runSasVerification(request: any): Promise<string[]> {
+    await request.accept()
+    const verifier = await request.startVerification('m.sas.v1')
+    return new Promise((resolve, reject) => {
+      verifier.on(VerifierEvent.ShowSas as any, (sas: any) => {
+        const emojis: string[] = (sas.emoji ?? []).map((e: any) => Array.isArray(e) ? e[0] : (e.emoji ?? e))
+        ;(request as any)._sasCallbacks = sas
+        resolve(emojis)
+      })
+      verifier.on(VerifierEvent.Cancel as any, () => reject(new Error('Verification cancelled')))
+    })
+  }
+
+  async confirmSas(request: any): Promise<void> {
+    await (request as any)._sasCallbacks?.confirm()
+  }
+
+  async rejectSas(request: any): Promise<void> {
+    await (request as any)._sasCallbacks?.mismatch()
   }
 
   private _displaySender(userId: string): string {

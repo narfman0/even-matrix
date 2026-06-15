@@ -21,6 +21,12 @@ export interface MatrixClient {
     onReaction?: (roomId: string, targetEventId: string, emoji: string) => void
   ): void
   stopSyncLoop(): void
+  getCrossSigningStatus?(): Promise<'ready' | 'not-setup' | 'unavailable'>
+  bootstrapE2EE?(passphrase: string): Promise<void>
+  onVerificationRequest?(cb: (request: any) => void): void
+  runSasVerification?(request: any): Promise<string[]>
+  confirmSas?(request: any): Promise<void>
+  rejectSas?(request: any): Promise<void>
 }
 
 export class MatrixRestClient implements MatrixClient {
