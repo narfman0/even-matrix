@@ -59,6 +59,7 @@
   let settingsOpen = $state(false)
   let previewOpen = $state(false)
   let msgInput = $state('')
+  let e2eeTrusted = $state(false)
 
   // Settings props for SettingsPanel
   let settingsHomeserver = $state('')
@@ -146,6 +147,7 @@
     bridge.onEvenHubEvent(plugin.handleEvenHubEvent)
     await plugin.start(syncToken)
     plugin.setupVerificationHandler()
+    matrix.getCrossSigningStatus?.().then((s: string) => { e2eeTrusted = s === 'ready' }).catch(() => {})
     if (savedRoomId) await plugin.navigateToRoom(savedRoomId)
   })
 </script>
@@ -168,6 +170,9 @@
     &nbsp;&nbsp;
     <span class:dot-green={state.whisperConfigured} class:dot-grey={!state.whisperConfigured}>◉</span>
     STT
+    &nbsp;&nbsp;
+    <span class:dot-green={e2eeTrusted} class:dot-grey={!e2eeTrusted}>🔐</span>
+    E2EE
     {#if state.mentioned}&nbsp;&nbsp;<span class="mention-flag">● mention</span>{/if}
   </div>
 {/if}
