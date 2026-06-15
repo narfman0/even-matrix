@@ -53,6 +53,8 @@
     audioBufBytes: 0,
     audioMaxBytes: 10 * 1024 * 1024,
     unreadRooms: [],
+    verificationRequest: null,
+    verificationEmoji: [],
   })
   let settingsOpen = $state(false)
   let previewOpen = $state(false)
@@ -79,6 +81,7 @@
         const vl = visibleLines(state.lines, state.scrollOffset)
         return vl.join('\n') || '(no messages)'
       }
+      case 'verification': return `Verify device\n${state.verificationEmoji.join(' ')}\nTap=confirm Back=reject`
       default: return ''
     }
   }
@@ -142,6 +145,7 @@
     }, userId)
     bridge.onEvenHubEvent(plugin.handleEvenHubEvent)
     await plugin.start(syncToken)
+    plugin.setupVerificationHandler()
     if (savedRoomId) await plugin.navigateToRoom(savedRoomId)
   })
 </script>
@@ -249,6 +253,20 @@
       <div class="sending-indicator">
         <div class="spinner">↻</div>
         Sending: {state.transcribedText}
+      </div>
+    {:else if state.view === 'verification'}
+      <div class="verification-view">
+        <div class="verif-heading">Verify Device</div>
+        {#if state.verificationEmoji.length === 0}
+          <div class="verif-waiting">Waiting for emoji…</div>
+        {:else}
+          <div class="verif-emoji">{state.verificationEmoji.join(' ')}</div>
+          <div class="verif-hint">Match these on your other device</div>
+          <div class="verif-actions">
+            <button class="ctrl-btn primary" onclick={() => plugin?.confirmVerification()}>✓ Match</button>
+            <button class="ctrl-btn danger" onclick={() => plugin?.rejectVerification()}>✗ No match</button>
+          </div>
+        {/if}
       </div>
     {:else}
       <MessageList lines={state.lines} scrollOffset={state.scrollOffset} mentions={state.mentions} />
@@ -382,4 +400,10 @@
     width: 8px; height: 8px; border-radius: 50%; background: #4caf50;
     display: inline-block; margin-left: 6px; vertical-align: middle;
   }
+  .verification-view { padding: 16px; }
+  .verif-heading { font-size: 13px; color: #f7c67e; margin-bottom: 8px; font-weight: bold; }
+  .verif-waiting { font-size: 12px; color: #888; }
+  .verif-emoji { font-size: 28px; letter-spacing: 4px; margin: 12px 0; }
+  .verif-hint { font-size: 11px; color: #888; margin-bottom: 12px; }
+  .verif-actions { display: flex; gap: 12px; }
 </style>

@@ -139,9 +139,11 @@ export function createPlugin(
   let lines: string[] = []
   let mentions: boolean[] = []
   let mentioned: boolean = false
-  let view: 'rooms' | 'messages' | 'listening' | 'loading' | 'transcribing' | 'sending' = 'rooms'
+  let view: 'rooms' | 'messages' | 'listening' | 'loading' | 'transcribing' | 'sending' | 'verification' = 'rooms'
   let loadingRoomName: string = ''
   let transcribedText: string = ''
+  let verificationRequest: any | null = null
+  let verificationEmoji: string[] = []
   let recognizing = false
   let matrixConnected = false
   let syncToken: string | null = null
@@ -439,6 +441,82 @@ export function createPlugin(
 
   let currentRoomMessages: MatrixMessage[] = []
 
+  async function showVerificationView(emoji: string[]) {
+    verificationEmoji = emoji
+    view = 'verification'
+    onUpdate?.()
+    try {
+      await bridge.rebuildPageContainer(new RebuildPageContainer({
+        containerTotalNum: 1,
+        textObject: [new TextContainerProperty({
+          xPosition: 0, yPosition: 0, width: 576, height: 288,
+          borderWidth: 0, paddingLength: 4,
+          containerID: CONTAINER_ID, containerName: 'verification',
+          content: emoji.length > 0
+            ? `Verify Device\n${emoji.join(' ')}\nTap=confirm Back=reject`
+            : 'Verify Device\nWaiting for emoji…',
+          isEventCapture: 1,
+        })],
+      }))
+    } catch (err) {
+      log('error', 'rebuildPageContainer (verification) failed', err)
+      pushError('rebuildPageContainer (verification) failed', String(err))
+    }
+  }
+
+  function setupVerificationHandler() {
+    matrix.onVerificationRequest?.((request: any) => {
+      verificationRequest = request
+      verificationEmoji = []
+      view = 'verification'
+      onUpdate?.()
+      // Show the waiting state immediately, then fill in emoji when SAS is ready
+      showVerificationView([]).catch(() => {})
+      matrix.runSasVerification?.(request).then((emojis: string[]) => {
+        verificationEmoji = emojis
+        onUpdate?.()
+        showVerificationView(emojis).catch(() => {})
+      }).catch(() => {
+        view = 'rooms'
+        verificationRequest = null
+        verificationEmoji = []
+        onUpdate?.()
+      })
+    })
+  }
+
+  async function confirmVerification() {
+    if (!verificationRequest) return
+    const req = verificationRequest
+    verificationRequest = null
+    verificationEmoji = []
+    view = 'rooms'
+    onUpdate?.()
+    try {
+      await matrix.confirmSas?.(req)
+    } catch (err) {
+      log('error', 'confirmSas failed', err)
+      pushError('confirmSas failed', String(err))
+    }
+    await showRoomList()
+  }
+
+  async function rejectVerification() {
+    if (!verificationRequest) return
+    const req = verificationRequest
+    verificationRequest = null
+    verificationEmoji = []
+    view = 'rooms'
+    onUpdate?.()
+    try {
+      await matrix.rejectSas?.(req)
+    } catch (err) {
+      log('error', 'rejectSas failed', err)
+      pushError('rejectSas failed', String(err))
+    }
+    await showRoomList()
+  }
+
   async function start(token: string | null) {
     log('info', 'start', { token })
     matrixConnected = true
@@ -667,7 +745,14 @@ export function createPlugin(
     if (event.sysEvent) {
       const et = event.sysEvent.eventType
       log('info', 'sysEvent', { eventType: et, view, msSinceListeningStart: Date.now() - listeningStartedAt })
-      if (view === 'listening' && recognizing && Date.now() - listeningStartedAt > 1000) {
+      if (view === 'verification') {
+        if (et === OsEventTypeList.CLICK_EVENT) {
+          await confirmVerification()
+        } else if (et === undefined) {
+          await rejectVerification()
+        }
+        return
+      } else if (view === 'listening' && recognizing && Date.now() - listeningStartedAt > 1000) {
         await stopAudio()
       } else if (view === 'loading') {
         if (et === undefined && Date.now() - roomNavStartedAt > 500) {
@@ -789,8 +874,8 @@ export function createPlugin(
   }
 
   function getState() {
-    return { hierarchy, displayedRooms, selectedRoomId, lines, mentions, mentioned, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken, prevBatch, loadingMore, audioLevel, lastSyncAt, whisperConfigured: !!whisperUrl, audioBufBytes: audioBuf.reduce((n, c) => n + c.length, 0), audioMaxBytes: AUDIO_MAX_BYTES, unreadRooms: [...unreadRooms] }
+    return { hierarchy, displayedRooms, selectedRoomId, lines, mentions, mentioned, view, loadingRoomName, transcribedText, recognizing, scrollOffset, matrixConnected, errors, syncToken, prevBatch, loadingMore, audioLevel, lastSyncAt, whisperConfigured: !!whisperUrl, audioBufBytes: audioBuf.reduce((n, c) => n + c.length, 0), audioMaxBytes: AUDIO_MAX_BYTES, unreadRooms: [...unreadRooms], verificationRequest, verificationEmoji }
   }
 
-  return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage, navigateToRoom, loadMoreHistory }
+  return { start, showRoomList, showMessageView, appendLine, startAudio, stopAudio, handleEvenHubEvent, getState, sendMessage, navigateToRoom, loadMoreHistory, setupVerificationHandler, confirmVerification, rejectVerification }
 }

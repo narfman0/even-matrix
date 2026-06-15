@@ -1267,3 +1267,93 @@ describe('reactions', () => {
     expect(chips[1]).toContain('❤️2')
   })
 })
+
+// ─── E2EE cross-signing ───────────────────────────────────────────────────────
+
+describe('e2ee cross-signing status', () => {
+  it('getCrossSigningStatus is available on the mock client', async () => {
+    const { matrix } = makePlugin()
+    expect(matrix.getCrossSigningStatus).toBeDefined()
+    const status = await matrix.getCrossSigningStatus()
+    expect(['ready', 'not-setup', 'unavailable']).toContain(status)
+  })
+
+  it('bootstrapE2EE is callable on the mock client', async () => {
+    const { matrix } = makePlugin()
+    await expect(matrix.bootstrapE2EE('secret-pass')).resolves.toBeUndefined()
+  })
+})
+
+// ─── Verification flow ────────────────────────────────────────────────────────
+
+describe('verification flow', () => {
+  it('receiving a verification request sets view to verification', async () => {
+    const { plugin, matrix } = makePlugin()
+    await plugin.start(null)
+    plugin.setupVerificationHandler()
+    const fakeRequest = {}
+    matrix.runSasVerification.mockResolvedValueOnce(['🦁', '🐧', '🌈', '🦊', '🐸', '🐬', '🦋'])
+    await matrix.triggerVerificationRequest(fakeRequest)
+    // give runSasVerification time to resolve
+    await new Promise(r => setTimeout(r, 0))
+    expect(plugin.getState().view).toBe('verification')
+  })
+
+  it('verification emoji are stored in state after SAS resolves', async () => {
+    const { plugin, matrix } = makePlugin()
+    await plugin.start(null)
+    plugin.setupVerificationHandler()
+    const emojis = ['🦁', '🐧', '🌈', '🦊', '🐸', '🐬', '🦋']
+    matrix.runSasVerification.mockResolvedValueOnce(emojis)
+    await matrix.triggerVerificationRequest({})
+    await new Promise(r => setTimeout(r, 0))
+    expect(plugin.getState().verificationEmoji).toEqual(emojis)
+  })
+
+  it('CLICK_EVENT in verification view calls confirmSas and returns to rooms', async () => {
+    const { plugin, matrix } = makePlugin()
+    await plugin.start(null)
+    plugin.setupVerificationHandler()
+    const fakeRequest = {}
+    matrix.runSasVerification.mockResolvedValueOnce(['🦁', '🐧', '🌈', '🦊', '🐸', '🐬', '🦋'])
+    await matrix.triggerVerificationRequest(fakeRequest)
+    await new Promise(r => setTimeout(r, 0))
+    expect(plugin.getState().view).toBe('verification')
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: 'CLICK' } })
+    expect(matrix.confirmSas).toHaveBeenCalledWith(fakeRequest)
+    expect(plugin.getState().view).toBe('rooms')
+    expect(plugin.getState().verificationRequest).toBeNull()
+  })
+
+  it('back gesture in verification view calls rejectSas and returns to rooms', async () => {
+    const { plugin, matrix } = makePlugin()
+    await plugin.start(null)
+    plugin.setupVerificationHandler()
+    const fakeRequest = {}
+    matrix.runSasVerification.mockResolvedValueOnce(['🦁', '🐧', '🌈', '🦊', '🐸', '🐬', '🦋'])
+    await matrix.triggerVerificationRequest(fakeRequest)
+    await new Promise(r => setTimeout(r, 0))
+    expect(plugin.getState().view).toBe('verification')
+    await plugin.handleEvenHubEvent({ sysEvent: { eventType: undefined } })
+    expect(matrix.rejectSas).toHaveBeenCalledWith(fakeRequest)
+    expect(plugin.getState().view).toBe('rooms')
+    expect(plugin.getState().verificationRequest).toBeNull()
+  })
+
+  it('failed SAS verification resets view to rooms', async () => {
+    const { plugin, matrix } = makePlugin()
+    await plugin.start(null)
+    plugin.setupVerificationHandler()
+    matrix.runSasVerification.mockRejectedValueOnce(new Error('Verification cancelled'))
+    await matrix.triggerVerificationRequest({})
+    await new Promise(r => setTimeout(r, 0))
+    expect(plugin.getState().view).toBe('rooms')
+    expect(plugin.getState().verificationRequest).toBeNull()
+  })
+
+  it('confirmVerification and rejectVerification are exposed from createPlugin', async () => {
+    const { plugin } = makePlugin()
+    expect(typeof plugin.confirmVerification).toBe('function')
+    expect(typeof plugin.rejectVerification).toBe('function')
+  })
+})
