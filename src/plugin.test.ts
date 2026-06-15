@@ -954,6 +954,56 @@ describe('audio buffer gauge (feature 6)', () => {
   })
 })
 
+// ─── Feature 8: Media type indicators ────────────────────────────────────────
+
+describe('media type indicators', () => {
+  it('image message shows [image] in lines', async () => {
+    const { plugin, matrix } = makePlugin()
+    await goToMessages(matrix, plugin, [{ sender: 'Alice', text: '[image]' }])
+    const { lines } = plugin.getState()
+    expect(lines.some(l => l.includes('[image]'))).toBe(true)
+  })
+
+  it('video message shows [video] in lines', async () => {
+    const { plugin, matrix } = makePlugin()
+    await goToMessages(matrix, plugin, [{ sender: 'Bob', text: '[video]' }])
+    const { lines } = plugin.getState()
+    expect(lines.some(l => l.includes('[video]'))).toBe(true)
+  })
+
+  it('audio message shows [audio] in lines', async () => {
+    const { plugin, matrix } = makePlugin()
+    await goToMessages(matrix, plugin, [{ sender: 'Carol', text: '[audio]' }])
+    const { lines } = plugin.getState()
+    expect(lines.some(l => l.includes('[audio]'))).toBe(true)
+  })
+
+  it('file message shows [file: name] in lines', async () => {
+    const { plugin, matrix } = makePlugin()
+    await goToMessages(matrix, plugin, [{ sender: 'Dave', text: '[file: report.pdf]' }])
+    const { lines } = plugin.getState()
+    expect(lines.some(l => l.includes('[file: report.pdf]'))).toBe(true)
+  })
+
+  it('sticker message shows [sticker] in lines', async () => {
+    const { plugin, matrix } = makePlugin()
+    await goToMessages(matrix, plugin, [{ sender: 'Eve', text: '[sticker]' }])
+    const { lines } = plugin.getState()
+    expect(lines.some(l => l.includes('[sticker]'))).toBe(true)
+  })
+
+  it('media message via sync shows in lines for selected room', async () => {
+    const { plugin, matrix } = makePlugin()
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
+    await plugin.start(null)
+    matrix.fetchHistory.mockResolvedValueOnce({ messages: [], prevBatch: null })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    await matrix.triggerSyncMessage('room-1', 'ev-img', 'Alice', '[image]')
+    const { lines } = plugin.getState()
+    expect(lines.some(l => l.includes('[image]'))).toBe(true)
+  })
+})
+
 // ─── Feature 7: Per-room unread dot ──────────────────────────────────────────
 
 describe('per-room unread dot (feature 7)', () => {

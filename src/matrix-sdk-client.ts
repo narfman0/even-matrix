@@ -102,11 +102,27 @@ export class MatrixSdkClient implements MatrixClient {
       const type = ev.type
       if (type !== 'm.room.message' && type !== 'm.room.encrypted') continue
       const content = ev.content
-      if (!content || content.msgtype !== 'm.text') continue
+      if (!content) continue
+      let text: string
+      if (content.msgtype === 'm.text') {
+        text = content.body as string
+      } else if (content.msgtype === 'm.image') {
+        text = '[image]'
+      } else if (content.msgtype === 'm.video') {
+        text = '[video]'
+      } else if (content.msgtype === 'm.audio') {
+        text = '[audio]'
+      } else if (content.msgtype === 'm.file') {
+        text = `[file: ${content.body ?? 'file'}]`
+      } else if (content.msgtype === 'm.sticker') {
+        text = '[sticker]'
+      } else {
+        continue
+      }
       messages.push({
         event_id: ev.event_id ?? '',
         sender: this._displaySender(ev.sender ?? ''),
-        text: content.body ?? '',
+        text,
         ts: Math.floor((ev.origin_server_ts ?? 0) / 1000),
       })
     }
@@ -141,7 +157,23 @@ export class MatrixSdkClient implements MatrixClient {
 
       const type = event.getType()
       if (type !== 'm.room.message') return
-      if (event.getContent()?.msgtype !== 'm.text') return
+      const content = event.getContent()
+      let text: string
+      if (content?.msgtype === 'm.text') {
+        text = content.body ?? ''
+      } else if (content?.msgtype === 'm.image') {
+        text = '[image]'
+      } else if (content?.msgtype === 'm.video') {
+        text = '[video]'
+      } else if (content?.msgtype === 'm.audio') {
+        text = '[audio]'
+      } else if (content?.msgtype === 'm.file') {
+        text = `[file: ${content.body ?? 'file'}]`
+      } else if (content?.msgtype === 'm.sticker') {
+        text = '[sticker]'
+      } else {
+        return
+      }
 
       const newToken = this.client.getSyncStateData()?.nextSyncToken
       if (newToken) onSyncToken(newToken)
@@ -149,7 +181,7 @@ export class MatrixSdkClient implements MatrixClient {
         room.roomId,
         event.getId() ?? '',
         this._displaySender(event.getSender() ?? ''),
-        event.getContent()?.body ?? ''
+        text
       )
     })
 
