@@ -85,9 +85,9 @@ export class MatrixSdkClient implements MatrixClient {
     return { dms, spaces, orphans }
   }
 
-  async fetchHistory(roomId: string, limit: number, from: string | null, signal?: AbortSignal): Promise<{ messages: MatrixMessage[]; prevBatch: string | null }> {
+  async fetchHistory(roomId: string, limit: number, from: string | null, signal?: AbortSignal): Promise<{ messages: MatrixMessage[]; prevBatch: string | null; reactions: Array<{ targetEventId: string; emoji: string }> }> {
     const room = this.client.getRoom(roomId)
-    if (!room) return { messages: [], prevBatch: null }
+    if (!room) return { messages: [], prevBatch: null, reactions: [] }
 
     const token = from ?? room.getLiveTimeline().getPaginationToken(Direction.Backward) ?? null
     const res = await this.client.createMessagesRequest(
@@ -98,14 +98,31 @@ export class MatrixSdkClient implements MatrixClient {
     )
 
     const messages: MatrixMessage[] = []
+    const reactions: Array<{ targetEventId: string; emoji: string }> = []
     for (const ev of ([...(res.chunk ?? [])]).reverse()) {
       const type = ev.type
+      if (type === 'm.reaction') {
+        const rel = ev.content?.['m.relates_to']
+        if (rel?.rel_type === 'm.annotation' && rel.event_id && rel.key) {
+          reactions.push({ targetEventId: rel.event_id, emoji: rel.key })
+        }
+        continue
+      }
       if (type !== 'm.room.message' && type !== 'm.room.encrypted') continue
       const content = ev.content
       if (!content) continue
+      const relatesTo = content['m.relates_to']
+      const inReplyTo = relatesTo?.['m.in_reply_to']?.event_id as string | undefined
       let text: string
       if (content.msgtype === 'm.text') {
-        text = content.body as string
+        let body = content.body as string
+        if (inReplyTo) {
+          const parts = body.split('\n\n')
+          if (parts.length >= 2 && parts[0].startsWith('> ')) {
+            body = parts.slice(1).join('\n\n')
+          }
+        }
+        text = body
       } else if (content.msgtype === 'm.image') {
         text = '[image]'
       } else if (content.msgtype === 'm.video') {
@@ -124,10 +141,11 @@ export class MatrixSdkClient implements MatrixClient {
         sender: this._displaySender(ev.sender ?? ''),
         text,
         ts: Math.floor((ev.origin_server_ts ?? 0) / 1000),
+        replyTo: inReplyTo,
       })
     }
 
-    return { messages, prevBatch: res.end ?? null }
+    return { messages, prevBatch: res.end ?? null, reactions }
   }
 
   async sendMessage(roomId: string, text: string): Promise<void> {
@@ -136,8 +154,9 @@ export class MatrixSdkClient implements MatrixClient {
 
   startSyncLoop(
     since: string,
-    onMessage: (roomId: string, eventId: string, sender: string, text: string) => void,
-    onSyncToken: (token: string) => void
+    onMessage: (roomId: string, eventId: string, sender: string, text: string, replyTo?: string) => void,
+    onSyncToken: (token: string) => void,
+    onReaction?: (roomId: string, targetEventId: string, emoji: string) => void
   ): void {
     this.running = true
     this.client.on(RoomEvent.Timeline, async (event, room) => {
@@ -156,11 +175,29 @@ export class MatrixSdkClient implements MatrixClient {
       }
 
       const type = event.getType()
+
+      if (type === 'm.reaction') {
+        const rel = event.getContent()?.['m.relates_to']
+        if (rel?.rel_type === 'm.annotation' && onReaction) {
+          onReaction(room.roomId, rel.event_id, rel.key)
+        }
+        return
+      }
+
       if (type !== 'm.room.message') return
       const content = event.getContent()
+      const relatesTo = content?.['m.relates_to']
+      const replyTo = relatesTo?.['m.in_reply_to']?.event_id as string | undefined
       let text: string
       if (content?.msgtype === 'm.text') {
-        text = content.body ?? ''
+        let body: string = content.body ?? ''
+        if (replyTo) {
+          const parts = body.split('\n\n')
+          if (parts.length >= 2 && parts[0].startsWith('> ')) {
+            body = parts.slice(1).join('\n\n')
+          }
+        }
+        text = body
       } else if (content?.msgtype === 'm.image') {
         text = '[image]'
       } else if (content?.msgtype === 'm.video') {
@@ -181,7 +218,8 @@ export class MatrixSdkClient implements MatrixClient {
         room.roomId,
         event.getId() ?? '',
         this._displaySender(event.getSender() ?? ''),
-        text
+        text,
+        replyTo
       )
     })
 

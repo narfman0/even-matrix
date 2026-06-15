@@ -161,6 +161,8 @@ export function createPlugin(
   let navAbort: AbortController | null = null
   let rollingTimer: ReturnType<typeof setTimeout> | null = null
   let rollingAbort: AbortController | null = null
+  let messageCache: Map<string, MatrixMessage> = new Map()
+  let reactions: Map<string, Map<string, number>> = new Map()
 
   function pushError(msg: string, data?: any) {
     const entry = data !== undefined
@@ -343,18 +345,99 @@ export function createPlugin(
     }
   }
 
-  async function onSyncMessage(roomId: string, eventId: string, sender: string, text: string, ts?: number) {
+  function buildRoomLines(msgs: MatrixMessage[]): string[] {
+    const result: string[] = []
+    for (const msg of msgs) {
+      if (msg.replyTo) {
+        const quoted = messageCache.get(msg.replyTo)
+        if (quoted) {
+          const quoteText = quoted.text.slice(0, 40) + (quoted.text.length > 40 ? '…' : '')
+          result.push(`  ↩ ${quoted.sender}: ${quoteText}`)
+        }
+      }
+      result.push(buildMessageLine(msg))
+    }
+    return result
+  }
+
+  function buildMentionFlags(msgs: MatrixMessage[]): boolean[] {
+    const result: boolean[] = []
+    for (const msg of msgs) {
+      if (msg.replyTo && messageCache.has(msg.replyTo)) {
+        result.push(false)
+      }
+      result.push(isMention(msg.text, userId))
+    }
+    return result
+  }
+
+  async function onSyncMessage(roomId: string, eventId: string, sender: string, text: string, replyTo?: string) {
     if (eventId && seenEventIds.has(eventId)) return
     if (eventId) seenEventIds.add(eventId)
-    const age = ts != null ? formatAge(ts) : formatAge(Date.now())
     if (roomId === selectedRoomId) {
-      const line = `[${age}] ${sender}: ${text}`
+      const newMsg: MatrixMessage = { event_id: eventId, sender, text, ts: Math.floor(Date.now() / 1000), replyTo }
+      if (eventId) messageCache.set(eventId, newMsg)
+      currentRoomMessages.push(newMsg)
+      if (replyTo) {
+        const quoted = messageCache.get(replyTo)
+        if (quoted) {
+          const quoteText = quoted.text.slice(0, 40) + (quoted.text.length > 40 ? '…' : '')
+          await appendLine(`  ↩ ${quoted.sender}: ${quoteText}`, false)
+        }
+      }
+      const line = buildMessageLine(newMsg)
       await appendLine(line, isMention(text, userId))
     } else {
       unreadRooms.add(roomId)
       onUpdate?.()
     }
   }
+
+  function onSyncReaction(roomId: string, targetEventId: string, emoji: string) {
+    if (roomId !== selectedRoomId) return
+    if (!reactions.has(targetEventId)) reactions.set(targetEventId, new Map())
+    const m = reactions.get(targetEventId)!
+    m.set(emoji, (m.get(emoji) ?? 0) + 1)
+    // Rebuild lines to reflect updated reaction counts
+    rebuildLinesFromCache()
+  }
+
+  function buildMessageLine(msg: MatrixMessage): string {
+    const age = formatAge(msg.ts * 1000)
+    const base = `[${age}] ${msg.sender}: ${msg.text}`
+    const reacts = reactions.get(msg.event_id)
+    if (!reacts || reacts.size === 0) return base
+    const top = [...reacts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+      .map(([e, c]) => `${e}${c}`)
+      .join(',')
+    return `${base}||REACT:${top}`
+  }
+
+  function rebuildLinesFromCache() {
+    // Rebuild lines array from messageCache for the current room
+    // We keep an ordered list of event_ids for the current room
+    const newLines: string[] = []
+    const newMentions: boolean[] = []
+    for (const msg of currentRoomMessages) {
+      if (msg.replyTo) {
+        const quoted = messageCache.get(msg.replyTo)
+        if (quoted) {
+          const quoteText = quoted.text.slice(0, 40) + (quoted.text.length > 40 ? '…' : '')
+          newLines.push(`  ↩ ${quoted.sender}: ${quoteText}`)
+          newMentions.push(false)
+        }
+      }
+      newLines.push(buildMessageLine(msg))
+      newMentions.push(isMention(msg.text, userId))
+    }
+    lines = newLines
+    mentions = newMentions
+    onUpdate?.()
+  }
+
+  let currentRoomMessages: MatrixMessage[] = []
 
   async function start(token: string | null) {
     log('info', 'start', { token })
@@ -369,7 +452,7 @@ export function createPlugin(
         syncToken = newToken
         lastSyncAt = Date.now()
         onUpdate?.()
-      })
+      }, onSyncReaction)
     } catch (err) {
       log('error', 'start failed', err)
       pushError('start failed', String(err))
@@ -555,7 +638,20 @@ export function createPlugin(
             navAbort = null
             seenEventIds = new Set(result.messages.map((m: MatrixMessage) => m.event_id).filter(Boolean))
             prevBatch = result.prevBatch
-            await showMessageView(result.messages.map((m: MatrixMessage) => `[${formatAge(m.ts * 1000)}] ${m.sender}: ${m.text}`))
+            // Reset and populate caches for the new room
+            messageCache = new Map()
+            reactions = new Map()
+            currentRoomMessages = result.messages
+            for (const m of result.messages) {
+              if (m.event_id) messageCache.set(m.event_id, m)
+            }
+            // Merge reactions from history
+            for (const { targetEventId, emoji } of (result.reactions ?? [])) {
+              if (!reactions.has(targetEventId)) reactions.set(targetEventId, new Map())
+              const rm = reactions.get(targetEventId)!
+              rm.set(emoji, (rm.get(emoji) ?? 0) + 1)
+            }
+            await showMessageView(buildRoomLines(result.messages))
           } catch (err) {
             if ((err as any)?.name === 'AbortError') return
             log('error', 'fetchHistory failed', err)
@@ -662,12 +758,19 @@ export function createPlugin(
         content: 'Loading older messages...',
       }))
       const result = await matrix.fetchHistory(selectedRoomId, 50, prevBatch)
-      const newLines = result.messages.map((m: MatrixMessage) => `[${formatAge(m.ts * 1000)}] ${m.sender}: ${m.text}`)
-      const newMentions = result.messages.map((m: MatrixMessage) => isMention(m.text, userId))
-      result.messages.forEach(m => { if (m.event_id) seenEventIds.add(m.event_id) })
+      result.messages.forEach(m => { if (m.event_id) { seenEventIds.add(m.event_id); messageCache.set(m.event_id, m) } })
+      // Merge reactions from older history
+      for (const { targetEventId, emoji } of (result.reactions ?? [])) {
+        if (!reactions.has(targetEventId)) reactions.set(targetEventId, new Map())
+        const rm = reactions.get(targetEventId)!
+        rm.set(emoji, (rm.get(emoji) ?? 0) + 1)
+      }
+      currentRoomMessages = [...result.messages, ...currentRoomMessages]
+      prevBatch = result.prevBatch
+      const newLines = buildRoomLines(result.messages)
+      const newMentions = buildMentionFlags(result.messages)
       lines = [...newLines, ...lines]
       mentions = [...newMentions, ...mentions]
-      prevBatch = result.prevBatch
     } catch (err) {
       log('error', 'loadMoreHistory failed', err)
       pushError('loadMoreHistory failed', String(err))

@@ -189,14 +189,14 @@ describe('start()', () => {
   it('passes persisted sync token to startSyncLoop when available', async () => {
     const { plugin, matrix } = makePlugin()
     await plugin.start('s_abc123')
-    expect(matrix.startSyncLoop).toHaveBeenCalledWith('s_abc123', expect.any(Function), expect.any(Function))
+    expect(matrix.startSyncLoop).toHaveBeenCalledWith('s_abc123', expect.any(Function), expect.any(Function), expect.any(Function))
   })
 
   it('uses nextBatch from initialSync when no persisted token', async () => {
     const { plugin, matrix } = makePlugin()
     matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [] }, nextBatch: 's_fresh' })
     await plugin.start(null)
-    expect(matrix.startSyncLoop).toHaveBeenCalledWith('s_fresh', expect.any(Function), expect.any(Function))
+    expect(matrix.startSyncLoop).toHaveBeenCalledWith('s_fresh', expect.any(Function), expect.any(Function), expect.any(Function))
   })
 
   it('sets matrixConnected to true', async () => {
@@ -1108,5 +1108,162 @@ describe('@mention highlighting', () => {
     expect(mentions[0]).toBe(false)
     expect(mentions[1]).toBe(true)
     expect(mentions[2]).toBe(false)
+  })
+})
+
+// ─── Feature: Reply threading ─────────────────────────────────────────────────
+
+describe('reply threading', () => {
+  it('shows reply quote line before reply message when quoted message is in cache', async () => {
+    const { plugin, matrix } = makePlugin()
+    await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [
+        { event_id: 'ev1', sender: 'Alice', text: 'original message', ts: 0 },
+        { event_id: 'ev2', sender: 'Bob', text: 'my reply', ts: 1, replyTo: 'ev1' },
+      ],
+      prevBatch: null,
+      reactions: [],
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    const { lines } = plugin.getState()
+    // Should have: [quote line, reply line, original line] = 3 lines
+    expect(lines).toHaveLength(3)
+    expect(lines[0]).toContain('Alice: original message')
+    expect(lines[1]).toContain('↩')
+    expect(lines[1]).toContain('Alice')
+    expect(lines[2]).toContain('Bob: my reply')
+  })
+
+  it('does not insert quote line when quoted message is not in cache', async () => {
+    const { plugin, matrix } = makePlugin()
+    await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [
+        { event_id: 'ev2', sender: 'Bob', text: 'reply to unknown', ts: 1, replyTo: 'ev-unknown' },
+      ],
+      prevBatch: null,
+      reactions: [],
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    const { lines } = plugin.getState()
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('Bob: reply to unknown')
+  })
+
+  it('truncates long quoted text to 40 chars with ellipsis', async () => {
+    const { plugin, matrix } = makePlugin()
+    await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
+    const longText = 'a'.repeat(60)
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [
+        { event_id: 'ev1', sender: 'Alice', text: longText, ts: 0 },
+        { event_id: 'ev2', sender: 'Bob', text: 'short reply', ts: 1, replyTo: 'ev1' },
+      ],
+      prevBatch: null,
+      reactions: [],
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    const { lines } = plugin.getState()
+    const quoteLine = lines.find(l => l.startsWith('  ↩ '))
+    expect(quoteLine).toBeDefined()
+    expect(quoteLine).toContain('…')
+    expect(quoteLine!.includes(longText)).toBe(false)
+  })
+
+  it('sync reply message inserts quote line before reply', async () => {
+    const { plugin, matrix } = makePlugin()
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
+    await plugin.start(null)
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [{ event_id: 'ev1', sender: 'Alice', text: 'original', ts: 0 }],
+      prevBatch: null,
+      reactions: [],
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    // Trigger a reply via sync
+    await matrix.triggerSyncMessage('room-1', 'ev2', 'Bob', 'synced reply', 'ev1')
+    const { lines } = plugin.getState()
+    const quoteLine = lines.find(l => l.startsWith('  ↩ '))
+    expect(quoteLine).toBeDefined()
+    expect(quoteLine).toContain('Alice')
+  })
+})
+
+// ─── Feature: Reactions ───────────────────────────────────────────────────────
+
+describe('reactions', () => {
+  it('fetchHistory reactions appear as ||REACT: suffix on message line', async () => {
+    const { plugin, matrix } = makePlugin()
+    await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [{ event_id: 'ev1', sender: 'Alice', text: 'hello', ts: 0 }],
+      prevBatch: null,
+      reactions: [
+        { targetEventId: 'ev1', emoji: '👍' },
+        { targetEventId: 'ev1', emoji: '👍' },
+        { targetEventId: 'ev1', emoji: '❤️' },
+      ],
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    const { lines } = plugin.getState()
+    expect(lines[0]).toContain('||REACT:')
+    expect(lines[0]).toContain('👍2')
+    expect(lines[0]).toContain('❤️1')
+  })
+
+  it('sync reaction via onReaction updates message line', async () => {
+    const { plugin, matrix } = makePlugin()
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
+    await plugin.start(null)
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [{ event_id: 'ev1', sender: 'Alice', text: 'hi', ts: 0 }],
+      prevBatch: null,
+      reactions: [],
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    // Trigger a reaction via sync
+    await matrix.triggerReaction('room-1', 'ev1', '🎉')
+    const { lines } = plugin.getState()
+    expect(lines.some(l => l.includes('||REACT:') && l.includes('🎉1'))).toBe(true)
+  })
+
+  it('reactions from non-selected room are ignored', async () => {
+    const { plugin, matrix } = makePlugin()
+    matrix.initialSync.mockResolvedValueOnce({ hierarchy: { dms: [], spaces: [], orphans: [{ id: 'room-1', name: 'Room1' }] }, nextBatch: 'batch-0' })
+    await plugin.start(null)
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [{ event_id: 'ev1', sender: 'Alice', text: 'hi', ts: 0 }],
+      prevBatch: null,
+      reactions: [],
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    await matrix.triggerReaction('room-other', 'ev1', '👍')
+    const { lines } = plugin.getState()
+    expect(lines.some(l => l.includes('||REACT:'))).toBe(false)
+  })
+
+  it('top 2 reactions by count shown when more than 2 exist', async () => {
+    const { plugin, matrix } = makePlugin()
+    await seedRooms(matrix, plugin, [{ id: 'r1', name: 'Room' }])
+    matrix.fetchHistory.mockResolvedValueOnce({
+      messages: [{ event_id: 'ev1', sender: 'Alice', text: 'popular', ts: 0 }],
+      prevBatch: null,
+      reactions: [
+        { targetEventId: 'ev1', emoji: '👍' },
+        { targetEventId: 'ev1', emoji: '👍' },
+        { targetEventId: 'ev1', emoji: '👍' },
+        { targetEventId: 'ev1', emoji: '❤️' },
+        { targetEventId: 'ev1', emoji: '❤️' },
+        { targetEventId: 'ev1', emoji: '😂' },
+      ],
+    })
+    await plugin.handleEvenHubEvent({ listEvent: { currentSelectItemIndex: 0 } })
+    const { lines } = plugin.getState()
+    const reactPart = lines[0].split('||REACT:')[1]
+    const chips = reactPart.split(',')
+    expect(chips).toHaveLength(2)
+    expect(chips[0]).toContain('👍3')
+    expect(chips[1]).toContain('❤️2')
   })
 })
