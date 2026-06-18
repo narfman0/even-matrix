@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MatrixRestClient } from './matrix-client'
+  import { MatrixRestClient, getLoginFlows } from './matrix-client'
   import { pcmToWav } from './plugin'
   import { probeWasm } from './wasm-probe'
   import {
@@ -36,6 +36,7 @@
   let passValue = $state('')
   let whisperValue = $state(whisperUrl)
   let whisperModel = $state(whisperModelProp)
+  let tokenValue = $state('')
   let saveStatus = $state('')
   let saveColor = $state('#888')
   let wasmStatus = $state('')
@@ -81,6 +82,16 @@
 
   async function saveCredentials() {
     try {
+      const flows = await getLoginFlows(hsValue.trim())
+      const hasPassword = flows.includes('m.login.password')
+      const hasSso = flows.some(f => f === 'm.login.sso' || f === 'm.login.cas')
+
+      if (!hasPassword && hasSso) {
+        saveStatus = 'This server requires SSO login. Use Element or your browser to log in, then paste the access token below.'
+        saveColor = '#f7c67e'
+        return
+      }
+
       const result = await MatrixRestClient.login(hsValue.trim(), userValue.trim(), passValue)
       await bridge.setLocalStorage(STORAGE_HOMESERVER, hsValue.trim())
       await bridge.setLocalStorage(STORAGE_USERNAME, userValue.trim())
@@ -93,6 +104,35 @@
       setTimeout(() => window.location.reload(), 800)
     } catch (e) {
       saveStatus = `Login failed: ${e}`
+      saveColor = '#f44336'
+    }
+  }
+
+  async function saveToken() {
+    if (!tokenValue.trim() || !hsValue.trim() || !userValue.trim()) {
+      saveStatus = 'Fill in Homeserver, Username, and Access Token.'
+      saveColor = '#f44336'
+      return
+    }
+    try {
+      const hs = hsValue.trim().replace(/\/$/, '')
+      const res = await fetch(`${hs}/_matrix/client/v3/account/whoami`, {
+        headers: { Authorization: `Bearer ${tokenValue.trim()}` },
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json() as { user_id: string; device_id?: string }
+      await bridge.setLocalStorage(STORAGE_HOMESERVER, hs)
+      await bridge.setLocalStorage(STORAGE_USERNAME, userValue.trim())
+      await bridge.setLocalStorage(STORAGE_ACCESS_TOKEN, tokenValue.trim())
+      await bridge.setLocalStorage(STORAGE_USER_ID, data.user_id)
+      if (data.device_id) await bridge.setLocalStorage('even_matrix_device_id', data.device_id)
+      tokenValue = ''
+      saveStatus = 'Token saved. Reloading...'
+      saveColor = '#4caf50'
+      setTimeout(() => window.location.reload(), 800)
+    } catch (e) {
+      saveStatus = `Token invalid: ${e}`
       saveColor = '#f44336'
     }
   }
@@ -156,6 +196,11 @@
     <button class="save-btn" onclick={saveCredentials}>Login</button>
   </div>
   <div class="settings-row">
+    <label class="settings-label" for="token-input">Access Token</label>
+    <input id="token-input" type="password" placeholder="syt_... (from Element)" bind:value={tokenValue} />
+    <button class="save-btn" onclick={saveToken}>Save</button>
+  </div>
+  <div class="settings-row">
     <label class="settings-label" for="whisper-input">Whisper URL</label>
     <input id="whisper-input" type="text" placeholder="http://whisper-server:8080 (optional)" bind:value={whisperValue} />
     <button class="save-btn" onclick={testWhisper}>Test</button>
@@ -217,12 +262,12 @@
   }
   .settings-label { font-size: 12px; color: #888; min-width: 80px; }
   .settings-value { font-size: 12px; color: #ccc; }
-  #hs-input, #user-input, #pass-input, #whisper-input, #whisper-model-input {
+  #hs-input, #user-input, #pass-input, #token-input, #whisper-input, #whisper-model-input {
     flex: 1; background: #1e1e1e; border: 1px solid #444; color: #eee;
     font-family: monospace; font-size: 12px; padding: 4px 8px;
     border-radius: 4px; outline: none;
   }
-  #hs-input:focus, #user-input:focus, #pass-input:focus, #whisper-input:focus, #whisper-model-input:focus { border-color: #666; }
+  #hs-input:focus, #user-input:focus, #pass-input:focus, #token-input:focus, #whisper-input:focus, #whisper-model-input:focus { border-color: #666; }
   .save-btn {
     padding: 4px 10px; border-radius: 4px; border: 1px solid #4caf50;
     background: #1a2e1a; color: #4caf50; font-family: monospace; font-size: 12px;

@@ -66,6 +66,16 @@ export class MatrixRestClient implements MatrixClient {
     return res.json()
   }
 
+  static async getLoginFlows(homeserver: string): Promise<string[]> {
+    const hs = homeserver.replace(/\/$/, '')
+    const res = await fetch(`${hs}/_matrix/client/v3/login`, {
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json() as { flows: Array<{ type: string }> }
+    return data.flows.map(f => f.type)
+  }
+
   static async login(homeserver: string, username: string, password: string) {
     const hs = homeserver.replace(/\/$/, '')
     const res = await fetch(`${hs}/_matrix/client/v3/login`, {
@@ -287,4 +297,8 @@ export class MatrixRestClient implements MatrixClient {
       return userId
     }
   }
+}
+
+export async function getLoginFlows(homeserver: string): Promise<string[]> {
+  return MatrixRestClient.getLoginFlows(homeserver)
 }
