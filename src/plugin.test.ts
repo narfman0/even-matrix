@@ -715,7 +715,7 @@ describe('stopAudio', () => {
       start(controller) {
         const enc = new TextEncoder()
         controller.enqueue(enc.encode('data: {"text":"hello"}\n\n'))
-        controller.enqueue(enc.encode('data: {"text":" world"}\n\ndata: [DONE]\n\n'))
+        controller.enqueue(enc.encode('data: {"text":"world"}\n\ndata: [DONE]\n\n'))
         controller.close()
       },
     })

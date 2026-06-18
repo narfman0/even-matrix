@@ -565,7 +565,11 @@ export function createPlugin(
             if (raw === '[DONE]') continue
             try {
               const { text: t } = JSON.parse(raw) as { text?: string }
-              if (t !== undefined) { text += t; await updateTranscribingText(text) }
+              if (t !== undefined) {
+                const needsSpace = text.length > 0 && !text.endsWith(' ') && !t.startsWith(' ') && !/^[.,!?:;'"\)\]\}]/.test(t)
+                text += needsSpace ? ' ' + t : t
+                await updateTranscribingText(text)
+              }
             } catch {}
           }
         }
