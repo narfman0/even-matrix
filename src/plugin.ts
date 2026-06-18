@@ -565,7 +565,7 @@ export function createPlugin(
             if (raw === '[DONE]') continue
             try {
               const { text: t } = JSON.parse(raw) as { text?: string }
-              if (t !== undefined) { text = t; await updateTranscribingText(text) }
+              if (t !== undefined) { text += t; await updateTranscribingText(text) }
             } catch {}
           }
         }
