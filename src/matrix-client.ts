@@ -7,18 +7,26 @@ export interface MatrixMessage {
   sender: string
   text: string
   ts: number
+  replyTo?: string  // event_id of the message being replied to
 }
 
 export interface MatrixClient {
   initialSync(): Promise<{ hierarchy: RoomHierarchy; nextBatch: string }>
-  fetchHistory(roomId: string, limit: number, from: string | null, signal?: AbortSignal): Promise<{ messages: MatrixMessage[], prevBatch: string | null }>
+  fetchHistory(roomId: string, limit: number, from: string | null, signal?: AbortSignal): Promise<{ messages: MatrixMessage[], prevBatch: string | null, reactions: Array<{ targetEventId: string; emoji: string }> }>
   sendMessage(roomId: string, text: string): Promise<void>
   startSyncLoop(
     since: string,
-    onMessage: (roomId: string, eventId: string, sender: string, text: string) => void,
-    onSyncToken: (token: string) => void
+    onMessage: (roomId: string, eventId: string, sender: string, text: string, replyTo?: string) => void,
+    onSyncToken: (token: string) => void,
+    onReaction?: (roomId: string, targetEventId: string, emoji: string) => void
   ): void
   stopSyncLoop(): void
+  getCrossSigningStatus?(): Promise<'ready' | 'not-setup' | 'unavailable'>
+  bootstrapE2EE?(passphrase: string): Promise<void>
+  onVerificationRequest?(cb: (request: any) => void): void
+  runSasVerification?(request: any): Promise<string[]>
+  confirmSas?(request: any): Promise<void>
+  rejectSas?(request: any): Promise<void>
 }
 
 export class MatrixRestClient implements MatrixClient {
@@ -135,25 +143,43 @@ export class MatrixRestClient implements MatrixClient {
     return { hierarchy: { dms, spaces, orphans }, nextBatch }
   }
 
-  async fetchHistory(roomId: string, limit: number, from: string | null, signal?: AbortSignal): Promise<{ messages: MatrixMessage[], prevBatch: string | null }> {
+  async fetchHistory(roomId: string, limit: number, from: string | null, signal?: AbortSignal): Promise<{ messages: MatrixMessage[], prevBatch: string | null, reactions: Array<{ targetEventId: string; emoji: string }> }> {
     const fromParam = from ? `&from=${encodeURIComponent(from)}` : ''
     const data = await this.get<{ chunk: any[], end?: string }>(
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=${limit}${fromParam}`,
       signal
     )
     const msgs: MatrixMessage[] = []
+    const reactions: Array<{ targetEventId: string; emoji: string }> = []
     for (const event of data.chunk) {
+      if (event.type === 'm.reaction') {
+        const rel = event.content?.['m.relates_to']
+        if (rel?.rel_type === 'm.annotation' && rel.event_id && rel.key) {
+          reactions.push({ targetEventId: rel.event_id, emoji: rel.key })
+        }
+        continue
+      }
       if (event.type !== 'm.room.message') continue
       if (event.content?.msgtype !== 'm.text') continue
+      const relatesTo = event.content?.['m.relates_to']
+      const inReplyTo = relatesTo?.['m.in_reply_to']?.event_id as string | undefined
+      let text: string = event.content.body
+      if (inReplyTo) {
+        const parts = (event.content.body as string).split('\n\n')
+        if (parts.length >= 2 && parts[0].startsWith('> ')) {
+          text = parts.slice(1).join('\n\n')
+        }
+      }
       msgs.push({
         event_id: event.event_id,
         sender: this.displaySender(event.sender),
-        text: event.content.body,
+        text,
         ts: Math.floor(event.origin_server_ts / 1000),
+        replyTo: inReplyTo,
       })
     }
     msgs.reverse()
-    return { messages: msgs, prevBatch: data.end ?? null }
+    return { messages: msgs, prevBatch: data.end ?? null, reactions }
   }
 
   async sendMessage(roomId: string, text: string): Promise<void> {
@@ -169,17 +195,19 @@ export class MatrixRestClient implements MatrixClient {
 
   startSyncLoop(
     since: string,
-    onMessage: (roomId: string, eventId: string, sender: string, text: string) => void,
-    onSyncToken: (token: string) => void
+    onMessage: (roomId: string, eventId: string, sender: string, text: string, replyTo?: string) => void,
+    onSyncToken: (token: string) => void,
+    onReaction?: (roomId: string, targetEventId: string, emoji: string) => void
   ): void {
     this.stopSync = false
-    void this.runSyncLoop(since, onMessage, onSyncToken)
+    void this.runSyncLoop(since, onMessage, onSyncToken, onReaction)
   }
 
   private async runSyncLoop(
     since: string,
-    onMessage: (roomId: string, eventId: string, sender: string, text: string) => void,
-    onSyncToken: (token: string) => void
+    onMessage: (roomId: string, eventId: string, sender: string, text: string, replyTo?: string) => void,
+    onSyncToken: (token: string) => void,
+    onReaction?: (roomId: string, targetEventId: string, emoji: string) => void
   ): Promise<void> {
     while (!this.stopSync) {
       try {
@@ -197,9 +225,25 @@ export class MatrixRestClient implements MatrixClient {
         if (data.rooms?.join) {
           for (const [roomId, roomData] of Object.entries(data.rooms.join as Record<string, any>)) {
             for (const event of (roomData.timeline?.events ?? [])) {
+              if (event.type === 'm.reaction') {
+                const rel = event.content?.['m.relates_to']
+                if (rel?.rel_type === 'm.annotation' && onReaction) {
+                  onReaction(roomId, rel.event_id, rel.key)
+                }
+                continue
+              }
               if (event.type !== 'm.room.message') continue
               if (event.content?.msgtype !== 'm.text') continue
-              await onMessage(roomId, event.event_id, this.displaySender(event.sender), event.content.body)
+              const relatesTo = event.content?.['m.relates_to']
+              const replyTo = relatesTo?.['m.in_reply_to']?.event_id as string | undefined
+              let text: string = event.content.body
+              if (replyTo) {
+                const parts = (event.content.body as string).split('\n\n')
+                if (parts.length >= 2 && parts[0].startsWith('> ')) {
+                  text = parts.slice(1).join('\n\n')
+                }
+              }
+              await onMessage(roomId, event.event_id, this.displaySender(event.sender), text, replyTo)
             }
           }
         }

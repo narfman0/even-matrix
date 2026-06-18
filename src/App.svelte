@@ -7,6 +7,7 @@
   } from '@evenrealities/even_hub_sdk'
   import { createPlugin } from './plugin'
   import { MatrixRestClient } from './matrix-client'
+  import { MatrixSdkClient } from './matrix-sdk-client'
   import { formatAge, visibleLines } from './message-utils'
   import {
     STORAGE_HOMESERVER,
@@ -16,6 +17,7 @@
     STORAGE_SYNC_TOKEN,
     STORAGE_WHISPER_URL,
     STORAGE_WHISPER_MODEL,
+    STORAGE_DEVICE_ID,
   } from './storage-keys'
   import appJson from '../app.json'
   import MessageList from './MessageList.svelte'
@@ -32,6 +34,8 @@
     displayedRooms: [],
     selectedRoomId: null,
     lines: [],
+    mentions: [],
+    mentioned: false,
     view: 'rooms',
     loadingRoomName: '',
     transcribedText: '',
@@ -48,10 +52,13 @@
     audioBufBytes: 0,
     audioMaxBytes: 10 * 1024 * 1024,
     unreadRooms: [],
+    verificationRequest: null,
+    verificationEmoji: [],
   })
   let settingsOpen = $state(false)
   let previewOpen = $state(false)
   let msgInput = $state('')
+  let e2eeTrusted = $state(false)
 
   // Settings props for SettingsPanel
   let settingsHomeserver = $state('')
@@ -61,6 +68,7 @@
 
   let plugin: Plugin | null = null
   let bridge: any = null
+  let matrixClient: import('./matrix-sdk-client').MatrixSdkClient | null = null
 
   function glassesPreviewText(): string {
     switch (state.view) {
@@ -73,6 +81,7 @@
         const vl = visibleLines(state.lines, state.scrollOffset)
         return vl.join('\n') || '(no messages)'
       }
+      case 'verification': return `Verify device\n${state.verificationEmoji.join(' ')}\nTap=confirm Back=reject`
       default: return ''
     }
   }
@@ -113,6 +122,8 @@
     const whisperUrl    = await bridge.getLocalStorage(STORAGE_WHISPER_URL).catch(() => null)
     const whisperMdl    = await bridge.getLocalStorage(STORAGE_WHISPER_MODEL).catch(() => null)
     const savedUser     = await bridge.getLocalStorage(STORAGE_USERNAME).catch(() => '')
+    const deviceId      = await bridge.getLocalStorage(STORAGE_DEVICE_ID).catch(() => '')
+
     settingsHomeserver = homeserver
     settingsUsername = savedUser
     settingsWhisperUrl = whisperUrl ?? ''
@@ -123,14 +134,17 @@
       return
     }
 
-    const matrix = new MatrixRestClient(homeserver, accessToken, userId)
+    matrixClient = new MatrixSdkClient(homeserver, accessToken, userId, deviceId || '')
+    const matrix = matrixClient
     plugin = createPlugin(bridge, matrix, whisperUrl || null, settingsWhisperModel, () => {
       state = plugin!.getState()
       const s = plugin!.getState()
       if (s.syncToken) bridge.setLocalStorage(STORAGE_SYNC_TOKEN, s.syncToken)
-    })
+    }, userId)
     bridge.onEvenHubEvent(plugin.handleEvenHubEvent)
     await plugin.start(syncToken)
+    plugin.setupVerificationHandler()
+    matrix.getCrossSigningStatus?.().then((s: string) => { e2eeTrusted = s === 'ready' }).catch(() => {})
   })
 </script>
 
@@ -152,6 +166,10 @@
     &nbsp;&nbsp;
     <span class:dot-green={state.whisperConfigured} class:dot-grey={!state.whisperConfigured}>◉</span>
     STT
+    &nbsp;&nbsp;
+    <span class:dot-green={e2eeTrusted} class:dot-grey={!e2eeTrusted}>🔐</span>
+    E2EE
+    {#if state.mentioned}&nbsp;&nbsp;<span class="mention-flag">● mention</span>{/if}
   </div>
 {/if}
 
@@ -189,6 +207,7 @@
     whisperUrl={settingsWhisperUrl}
     whisperModel={settingsWhisperModel}
     appVersion={APP_VERSION}
+    matrix={matrixClient}
   />
 {:else}
   <div id="content">
@@ -236,8 +255,22 @@
         <div class="spinner">↻</div>
         Sending: {state.transcribedText}
       </div>
+    {:else if state.view === 'verification'}
+      <div class="verification-view">
+        <div class="verif-heading">Verify Device</div>
+        {#if state.verificationEmoji.length === 0}
+          <div class="verif-waiting">Waiting for emoji…</div>
+        {:else}
+          <div class="verif-emoji">{state.verificationEmoji.join(' ')}</div>
+          <div class="verif-hint">Match these on your other device</div>
+          <div class="verif-actions">
+            <button class="ctrl-btn primary" onclick={() => plugin?.confirmVerification()}>✓ Match</button>
+            <button class="ctrl-btn danger" onclick={() => plugin?.rejectVerification()}>✗ No match</button>
+          </div>
+        {/if}
+      </div>
     {:else}
-      <MessageList lines={state.lines} scrollOffset={state.scrollOffset} />
+      <MessageList lines={state.lines} scrollOffset={state.scrollOffset} mentions={state.mentions} />
       {#if state.prevBatch !== null}
         <button class="load-more-btn" onclick={loadMore} disabled={state.loadingMore}>
           {state.loadingMore ? 'Loading...' : 'Load more'}
@@ -345,6 +378,7 @@
   }
   .dot-green { color: #4caf50; }
   .dot-grey  { color: #444; }
+  .mention-flag { color: #f7c67e; font-weight: bold; }
   #preview-btn {
     background: none; border: none; color: #888; font-size: 16px;
     cursor: pointer; padding: 0 4px; line-height: 1;
@@ -367,4 +401,10 @@
     width: 8px; height: 8px; border-radius: 50%; background: #4caf50;
     display: inline-block; margin-left: 6px; vertical-align: middle;
   }
+  .verification-view { padding: 16px; }
+  .verif-heading { font-size: 13px; color: #f7c67e; margin-bottom: 8px; font-weight: bold; }
+  .verif-waiting { font-size: 12px; color: #888; }
+  .verif-emoji { font-size: 28px; letter-spacing: 4px; margin: 12px 0; }
+  .verif-hint { font-size: 11px; color: #888; margin-bottom: 12px; }
+  .verif-actions { display: flex; gap: 12px; }
 </style>

@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "latest",
-    "@matrix-org/matrix-sdk-crypto-wasm": "^18.3.1"
+    "@matrix-org/matrix-sdk-crypto-wasm": "^18.3.1",
+    "matrix-js-sdk": "^41.7.0"
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "^0.1.13",

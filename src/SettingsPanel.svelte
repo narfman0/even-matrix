@@ -19,6 +19,7 @@
     whisperUrl,
     whisperModel: whisperModelProp,
     appVersion,
+    matrix,
   }: {
     errors: string[]
     bridge: any
@@ -27,6 +28,7 @@
     whisperUrl: string
     whisperModel: string
     appVersion: string
+    matrix: any
   } = $props()
 
   let hsValue = $state(homeserver)
@@ -38,6 +40,34 @@
   let saveColor = $state('#888')
   let wasmStatus = $state('')
   let wasmColor = $state('#888')
+
+  let e2eeStatus = $state<'checking' | 'ready' | 'not-setup' | 'unavailable' | 'error'>('checking')
+  let e2eePassphrase = $state('')
+  let e2eeSetupStatus = $state('')
+  let e2eeSetupColor = $state('#888')
+
+  $effect(() => {
+    if (matrix) {
+      matrix.getCrossSigningStatus?.().then((s: string) => { e2eeStatus = s as any }).catch(() => { e2eeStatus = 'unavailable' })
+    } else {
+      e2eeStatus = 'unavailable'
+    }
+  })
+
+  async function setupE2EE() {
+    if (!e2eePassphrase) { e2eeSetupStatus = 'Enter a passphrase.'; e2eeSetupColor = '#f44336'; return }
+    e2eeSetupStatus = 'Setting up…'; e2eeSetupColor = '#888'
+    try {
+      await matrix.bootstrapE2EE(e2eePassphrase)
+      e2eeStatus = 'ready'
+      e2eeSetupStatus = 'Done! Cross-signing ready.'
+      e2eeSetupColor = '#4caf50'
+      e2eePassphrase = ''
+    } catch (e) {
+      e2eeSetupStatus = `Failed: ${e}`
+      e2eeSetupColor = '#f44336'
+    }
+  }
 
   async function testWasmProbe() {
     wasmStatus = 'Testing WASM…'
@@ -145,6 +175,23 @@
     <div id="wasm-status" style="color: {wasmColor}">{wasmStatus}</div>
   {/if}
 
+  <div class="settings-heading e2ee-heading">E2EE Trust</div>
+  {#if e2eeStatus === 'checking'}
+    <div class="e2ee-status" style="color: #888">Checking…</div>
+  {:else if e2eeStatus === 'ready'}
+    <div class="e2ee-status" style="color: #4caf50">✓ Cross-signing ready</div>
+  {:else if e2eeStatus === 'not-setup'}
+    <div class="e2ee-status" style="color: #f7c67e">⚠ Cross-signing not set up</div>
+    <div class="settings-row">
+      <label class="settings-label" for="e2ee-pass">Passphrase</label>
+      <input id="e2ee-pass" type="password" placeholder="Recovery passphrase" bind:value={e2eePassphrase} />
+      <button class="save-btn" onclick={setupE2EE}>Setup</button>
+    </div>
+    <div id="e2ee-setup-status" style="color: {e2eeSetupColor}">{e2eeSetupStatus}</div>
+  {:else}
+    <div class="e2ee-status" style="color: #555">E2EE unavailable (not logged in)</div>
+  {/if}
+
   <div id="error-log">
     <h3>ERRORS</h3>
     {#if errors.length === 0}
@@ -192,4 +239,9 @@
   #no-errors { font-size: 11px; color: #555; }
   .diag-row { border-top: 1px solid #333; padding-top: 8px; margin-top: 4px; }
   #wasm-status { font-size: 11px; margin-bottom: 8px; word-break: break-all; }
+  .e2ee-heading { margin-top: 12px; }
+  .e2ee-status { font-size: 11px; margin-bottom: 8px; }
+  #e2ee-setup-status { font-size: 11px; margin-bottom: 8px; min-height: 16px; }
+  #e2ee-pass { flex: 1; background: #1e1e1e; border: 1px solid #444; color: #eee; font-family: monospace; font-size: 12px; padding: 4px 8px; border-radius: 4px; outline: none; }
+  #e2ee-pass:focus { border-color: #666; }
 </style>
