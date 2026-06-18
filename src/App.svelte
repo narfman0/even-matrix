@@ -16,7 +16,6 @@
     STORAGE_SYNC_TOKEN,
     STORAGE_WHISPER_URL,
     STORAGE_WHISPER_MODEL,
-    STORAGE_SELECTED_ROOM,
   } from './storage-keys'
   import appJson from '../app.json'
   import MessageList from './MessageList.svelte'
@@ -114,8 +113,6 @@
     const whisperUrl    = await bridge.getLocalStorage(STORAGE_WHISPER_URL).catch(() => null)
     const whisperMdl    = await bridge.getLocalStorage(STORAGE_WHISPER_MODEL).catch(() => null)
     const savedUser     = await bridge.getLocalStorage(STORAGE_USERNAME).catch(() => '')
-    const savedRoomId   = await bridge.getLocalStorage(STORAGE_SELECTED_ROOM).catch(() => null)
-
     settingsHomeserver = homeserver
     settingsUsername = savedUser
     settingsWhisperUrl = whisperUrl ?? ''
@@ -131,11 +128,9 @@
       state = plugin!.getState()
       const s = plugin!.getState()
       if (s.syncToken) bridge.setLocalStorage(STORAGE_SYNC_TOKEN, s.syncToken)
-      if (s.selectedRoomId) bridge.setLocalStorage(STORAGE_SELECTED_ROOM, s.selectedRoomId)
     })
     bridge.onEvenHubEvent(plugin.handleEvenHubEvent)
     await plugin.start(syncToken)
-    if (savedRoomId) await plugin.navigateToRoom(savedRoomId)
   })
 </script>
 
