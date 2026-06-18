@@ -209,6 +209,7 @@ export class MatrixRestClient implements MatrixClient {
     onSyncToken: (token: string) => void,
     onReaction?: (roomId: string, targetEventId: string, emoji: string) => void
   ): Promise<void> {
+    let backoffMs = 2000
     while (!this.stopSync) {
       try {
         this.abortController = new AbortController()
@@ -217,10 +218,19 @@ export class MatrixRestClient implements MatrixClient {
           headers: this.authHeaders(),
           signal: this.abortController.signal,
         })
-        if (!res.ok) throw new Error(`sync: ${res.status}`)
+        if (!res.ok) {
+          if (res.status === 429) {
+            const retryAfter = parseInt(res.headers.get('Retry-After') ?? '5', 10) * 1000
+            await new Promise(r => setTimeout(r, retryAfter))
+            continue
+          }
+          throw new Error(`sync: ${res.status}`)
+        }
         const data: any = await res.json()
         since = data.next_batch as string
         onSyncToken(since)
+        // reset backoff on success
+        backoffMs = 2000
 
         if (data.rooms?.join) {
           for (const [roomId, roomData] of Object.entries(data.rooms.join as Record<string, any>)) {
@@ -249,7 +259,12 @@ export class MatrixRestClient implements MatrixClient {
         }
       } catch (e: any) {
         if (e?.name === 'AbortError') return
-        await new Promise(r => setTimeout(r, 5000))
+        // respect Retry-After header if present (matrix.org rate limiting)
+        const retryAfter = (e as any)?.retryAfterMs
+        const delay = retryAfter ?? Math.min(backoffMs, 60000)
+        backoffMs = Math.min(backoffMs * 2, 60000)
+        await new Promise(r => setTimeout(r, delay))
+        continue
       }
     }
   }
