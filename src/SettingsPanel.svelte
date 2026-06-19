@@ -41,6 +41,7 @@
   let saveColor = $state('#888')
   let wasmStatus = $state('')
   let wasmColor = $state('#888')
+  let errorLogOpen = $state(false)
 
   let e2eeStatus = $state<'checking' | 'ready' | 'not-setup' | 'unavailable' | 'error'>('checking')
   let e2eePassphrase = $state('')
@@ -178,6 +179,12 @@
 
 <div id="settings-panel">
   <div class="settings-heading">Settings</div>
+  {#if !homeserver}
+    <div class="onboarding">
+      <div class="onboarding-title">Welcome to even-matrix</div>
+      <div class="onboarding-body">Enter your Matrix homeserver and credentials below to connect. Use <strong>matrix.org</strong> or any Matrix-compatible server. If your server uses SSO (e.g. Google login), grab your access token from Element → Settings → Help &amp; About.</div>
+    </div>
+  {/if}
   <div class="settings-row">
     <span class="settings-label">Version</span>
     <span class="settings-value">v{appVersion}</span>
@@ -237,20 +244,30 @@
     <div class="e2ee-status" style="color: #555">E2EE unavailable (not logged in)</div>
   {/if}
 
-  <div id="error-log">
-    <h3>ERRORS</h3>
-    {#if errors.length === 0}
-      <div id="no-errors">none</div>
-    {:else}
-      {#each [...errors].reverse() as err}
-        <div class="error-entry">{err}</div>
-      {/each}
-    {/if}
+  <div class="settings-row diag-row">
+    <span class="settings-label">Error Log</span>
+    <button class="save-btn" onclick={() => errorLogOpen = !errorLogOpen}>
+      {errorLogOpen ? 'Hide' : 'Show'} ({errors.length})
+    </button>
   </div>
+  {#if errorLogOpen}
+    <div id="error-log">
+      {#if errors.length === 0}
+        <div id="no-errors">none</div>
+      {:else}
+        {#each [...errors].reverse() as err}
+          <div class="error-entry">{err}</div>
+        {/each}
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
   #settings-panel { padding: 12px; }
+  .onboarding { background: #1a1a2e; border: 1px solid #444; border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; }
+  .onboarding-title { font-size: 12px; font-weight: bold; color: #7eb8f7; margin-bottom: 4px; }
+  .onboarding-body { font-size: 11px; color: #aaa; line-height: 1.5; }
   .settings-heading {
     font-size: 13px; color: #aaa; font-weight: bold;
     text-transform: uppercase; letter-spacing: 0.05em;

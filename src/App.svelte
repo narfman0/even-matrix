@@ -59,6 +59,7 @@
   let previewOpen = $state(false)
   let msgInput = $state('')
   let e2eeTrusted = $state(false)
+  let startError = $state('')
 
   // Settings props for SettingsPanel
   let settingsHomeserver = $state('')
@@ -142,7 +143,12 @@
       if (s.syncToken) bridge.setLocalStorage(STORAGE_SYNC_TOKEN, s.syncToken)
     }, userId)
     bridge.onEvenHubEvent(plugin.handleEvenHubEvent)
-    await plugin.start(syncToken)
+    try {
+      await plugin.start(syncToken)
+      if (state.selectedRoomId) await plugin.navigateToRoom?.(state.selectedRoomId)
+    } catch (e) {
+      startError = String(e)
+    }
     plugin.setupVerificationHandler()
     matrix.getCrossSigningStatus?.().then((s: string) => { e2eeTrusted = s === 'ready' }).catch(() => {})
   })
@@ -198,6 +204,13 @@
   </div>
 {/if}
 
+{#if startError && !settingsOpen}
+  <div id="start-error">
+    <div class="start-error-msg">{startError}</div>
+    <button class="ctrl-btn" onclick={() => { startError = ''; plugin?.start(null).catch(e => startError = String(e)) }}>Retry</button>
+  </div>
+{/if}
+
 {#if settingsOpen}
   <SettingsPanel
     errors={state.errors}
@@ -213,7 +226,10 @@
   <div id="content">
     {#if state.view === 'rooms'}
       {#if state.displayedRooms.length === 0}
-        <div class="no-rooms">No rooms</div>
+        <div class="no-rooms">
+          No rooms found.<br/>
+          <span class="no-rooms-hint">Make sure you've joined rooms in Element or another Matrix client first.</span>
+        </div>
       {:else}
         {#each state.displayedRooms as item, index}
           {#if item.isHeader}
@@ -308,6 +324,7 @@
     border-bottom: 1px solid #333; margin-top: 8px; cursor: default;
   }
   .no-rooms { color: #555; padding: 8px; }
+  .no-rooms-hint { font-size: 11px; color: #444; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .load-more-btn {
     display: block; width: 100%; margin-top: 8px; padding: 6px;
@@ -401,6 +418,8 @@
     width: 8px; height: 8px; border-radius: 50%; background: #4caf50;
     display: inline-block; margin-left: 6px; vertical-align: middle;
   }
+  #start-error { padding: 16px; text-align: center; }
+  .start-error-msg { font-size: 12px; color: #f44336; margin-bottom: 10px; }
   .verification-view { padding: 16px; }
   .verif-heading { font-size: 13px; color: #f7c67e; margin-bottom: 8px; font-weight: bold; }
   .verif-waiting { font-size: 12px; color: #888; }
